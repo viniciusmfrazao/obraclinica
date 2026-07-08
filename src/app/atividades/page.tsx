@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Pencil } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Activity, ActivityStatus, STATUS_LABELS } from "@/lib/types";
 import { formatDate } from "@/lib/format";
@@ -15,12 +15,17 @@ export default function AtividadesPage() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<ActivityStatus>("planejado");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
+
+  // filtros
+  const [filterStatus, setFilterStatus] = useState<ActivityStatus | "">("");
+  const [search, setSearch] = useState("");
 
   async function load() {
     setLoading(true);
@@ -36,17 +41,37 @@ export default function AtividadesPage() {
     load();
   }, []);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    await supabase
-      .from("activities")
-      .insert({ title, description, status, date });
-    setSaving(false);
-    setOpen(false);
+  function openNew() {
+    setEditingId(null);
     setTitle("");
     setDescription("");
     setStatus("planejado");
+    setDate(new Date().toISOString().slice(0, 10));
+    setOpen(true);
+  }
+
+  function openEdit(a: Activity) {
+    setEditingId(a.id);
+    setTitle(a.title);
+    setDescription(a.description ?? "");
+    setStatus(a.status);
+    setDate(a.date);
+    setOpen(true);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    if (editingId) {
+      await supabase
+        .from("activities")
+        .update({ title, description, status, date })
+        .eq("id", editingId);
+    } else {
+      await supabase.from("activities").insert({ title, description, status, date });
+    }
+    setSaving(false);
+    setOpen(false);
     load();
   }
 
@@ -61,6 +86,12 @@ export default function AtividadesPage() {
     load();
   }
 
+  const filtered = activities.filter((a) => {
+    if (filterStatus && a.status !== filterStatus) return false;
+    if (search && !a.title.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
   return (
     <div>
       <PageHeader
@@ -68,7 +99,7 @@ export default function AtividadesPage() {
         title="Atividades"
         action={
           <button
-            onClick={() => setOpen(true)}
+            onClick={openNew}
             className="flex items-center gap-2 bg-blueprint hover:bg-blueprint-dark text-white text-sm font-medium px-4 py-2 rounded-md transition-colors"
           >
             <Plus size={16} /> Nova atividade
@@ -77,16 +108,38 @@ export default function AtividadesPage() {
       />
 
       <div className="px-6 md:px-10 py-8">
+        <div className="flex flex-wrap gap-2 mb-5 max-w-3xl">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por título…"
+            className="flex-1 min-w-[160px] rounded-md border border-line bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blueprint"
+          />
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value as ActivityStatus | "")}
+            className="rounded-md border border-line bg-white px-3 py-1.5 text-sm"
+          >
+            <option value="">Todos os status</option>
+            {Object.entries(STATUS_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {loading ? (
           <p className="text-ink-soft text-sm font-mono">Carregando…</p>
-        ) : activities.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <p className="text-ink-soft text-sm">
-            Nenhuma atividade registrada ainda. Comece adicionando a primeira
-            etapa da obra.
+            {activities.length === 0
+              ? "Nenhuma atividade registrada ainda. Comece adicionando a primeira etapa da obra."
+              : "Nenhuma atividade encontrada com esses filtros."}
           </p>
         ) : (
           <div className="space-y-3 max-w-3xl">
-            {activities.map((a) => (
+            {filtered.map((a) => (
               <div
                 key={a.id}
                 className="bg-card border border-line rounded-lg p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between"
@@ -118,6 +171,13 @@ export default function AtividadesPage() {
                     ))}
                   </select>
                   <button
+                    onClick={() => openEdit(a)}
+                    className="text-ink-soft hover:text-blueprint"
+                    aria-label="Editar"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
                     onClick={() => remove(a.id)}
                     className="text-xs text-ink-soft hover:text-safety"
                   >
@@ -130,7 +190,11 @@ export default function AtividadesPage() {
         )}
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Nova atividade">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title={editingId ? "Editar atividade" : "Nova atividade"}
+      >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm text-ink-soft mb-1">Título</label>
@@ -183,7 +247,7 @@ export default function AtividadesPage() {
             disabled={saving}
             className="w-full bg-blueprint hover:bg-blueprint-dark text-white font-medium py-2.5 rounded-md transition-colors disabled:opacity-60"
           >
-            {saving ? "Salvando…" : "Salvar atividade"}
+            {saving ? "Salvando…" : editingId ? "Salvar alterações" : "Salvar atividade"}
           </button>
         </form>
       </Modal>

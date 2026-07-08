@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { Plus, Check, Trash2 } from "lucide-react";
+import { Plus, Check, Trash2, Pencil } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { ShoppingItem } from "@/lib/types";
 import { formatCurrency } from "@/lib/format";
@@ -15,6 +15,7 @@ export default function ListaDeComprasPage() {
   const [items, setItems] = useState<ShoppingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const activities = useActivities();
 
   const [name, setName] = useState("");
@@ -39,10 +40,30 @@ export default function ListaDeComprasPage() {
     load();
   }, []);
 
+  function openNew() {
+    setEditingId(null);
+    setName("");
+    setQuantity("1");
+    setUnit("un");
+    setEstimatedPrice("");
+    setActivityId("");
+    setOpen(true);
+  }
+
+  function openEdit(item: ShoppingItem) {
+    setEditingId(item.id);
+    setName(item.name);
+    setQuantity(String(item.quantity));
+    setUnit(item.unit);
+    setEstimatedPrice(item.estimated_price ? String(item.estimated_price) : "");
+    setActivityId(item.activity_id ?? "");
+    setOpen(true);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    await supabase.from("shopping_list_items").insert({
+    const payload = {
       name,
       quantity: parseFloat(quantity.replace(",", ".")) || 1,
       unit,
@@ -50,7 +71,12 @@ export default function ListaDeComprasPage() {
         ? parseFloat(estimatedPrice.replace(",", "."))
         : null,
       activity_id: activityId || null,
-    });
+    };
+    if (editingId) {
+      await supabase.from("shopping_list_items").update(payload).eq("id", editingId);
+    } else {
+      await supabase.from("shopping_list_items").insert(payload);
+    }
     setSaving(false);
     setOpen(false);
     setName("");
@@ -93,7 +119,7 @@ export default function ListaDeComprasPage() {
         title="Lista de compras"
         action={
           <button
-            onClick={() => setOpen(true)}
+            onClick={openNew}
             className="flex items-center gap-2 bg-blueprint hover:bg-blueprint-dark text-white text-sm font-medium px-4 py-2 rounded-md transition-colors"
           >
             <Plus size={16} /> Novo item
@@ -118,6 +144,7 @@ export default function ListaDeComprasPage() {
                     item={item}
                     onToggle={toggleDone}
                     onRemove={remove}
+                    onEdit={openEdit}
                   />
                 ))}
               </div>
@@ -135,6 +162,7 @@ export default function ListaDeComprasPage() {
                       item={item}
                       onToggle={toggleDone}
                       onRemove={remove}
+                      onEdit={openEdit}
                     />
                   ))}
                 </div>
@@ -144,7 +172,7 @@ export default function ListaDeComprasPage() {
         )}
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Novo item">
+      <Modal open={open} onClose={() => setOpen(false)} title={editingId ? "Editar item" : "Novo item"}>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm text-ink-soft mb-1">Item</label>
@@ -214,7 +242,7 @@ export default function ListaDeComprasPage() {
             disabled={saving}
             className="w-full bg-blueprint hover:bg-blueprint-dark text-white font-medium py-2.5 rounded-md transition-colors disabled:opacity-60"
           >
-            {saving ? "Salvando…" : "Adicionar à lista"}
+            {saving ? "Salvando…" : editingId ? "Salvar alterações" : "Adicionar à lista"}
           </button>
         </form>
       </Modal>
@@ -226,10 +254,12 @@ function ShoppingRow({
   item,
   onToggle,
   onRemove,
+  onEdit,
 }: {
   item: ShoppingItem;
   onToggle: (id: string, done: boolean) => void;
   onRemove: (id: string) => void;
+  onEdit: (item: ShoppingItem) => void;
 }) {
   return (
     <div
@@ -262,6 +292,14 @@ function ShoppingRow({
             : ""}
         </p>
       </div>
+
+      <button
+        onClick={() => onEdit(item)}
+        className="text-ink-soft hover:text-blueprint shrink-0"
+        aria-label="Editar"
+      >
+        <Pencil size={14} />
+      </button>
 
       <button
         onClick={() => onRemove(item.id)}

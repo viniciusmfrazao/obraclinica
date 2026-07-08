@@ -43,7 +43,22 @@ export interface Doc {
   category: DocumentCategory;
   file_path: string;
   activity_id: string | null;
+  folder_id: string | null;
   date: string;
+  created_at: string;
+}
+
+export interface Folder {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface Budget {
+  id: string;
+  category: PaymentCategory | null;
+  activity_id: string | null;
+  amount: number;
   created_at: string;
 }
 
