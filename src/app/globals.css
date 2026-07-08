@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #ede9df;
+  --card: #f7f5ee;
+  --ink: #1b2430;
+  --ink-soft: #57626f;
+  --blueprint: #2b5b84;
+  --blueprint-dark: #1e4262;
+  --safety: #d97324;
+  --line: #cdc6b6;
+  --success: #4b7b54;
+
+  --font-display: "Space Grotesk", sans-serif;
+  --font-body: "IBM Plex Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-blueprint: var(--blueprint);
+  --color-blueprint-dark: var(--blueprint-dark);
+  --color-safety: var(--safety);
+  --color-line: var(--line);
+  --color-success: var(--success);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+.bg-blueprint-grid {
+  background-image:
+    linear-gradient(rgba(43, 91, 132, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(43, 91, 132, 0.1) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+::selection {
+  background: var(--safety);
+  color: white;
+}
