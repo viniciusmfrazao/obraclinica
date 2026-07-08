@@ -22,8 +22,10 @@ export interface Payment {
   amount: number;
   category: PaymentCategory;
   supplier: string | null;
+  account: string | null;
   date: string;
   receipt_path: string | null;
+  invoice_path: string | null;
   activity_id: string | null;
   created_at: string;
 }
