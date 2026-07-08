@@ -35,6 +35,7 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-body);
+  overflow-x: hidden;
 }
 
 .bg-blueprint-grid {

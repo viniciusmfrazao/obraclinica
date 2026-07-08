@@ -66,19 +66,19 @@ export default function Sidebar() {
       </aside>
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-20 bg-card border-t border-line flex justify-around py-2">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-20 bg-card border-t border-line flex py-2">
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname === href;
           return (
             <Link
               key={href}
               href={href}
-              className={`flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] ${
+              className={`flex-1 min-w-0 flex flex-col items-center gap-0.5 px-1 py-1 text-[9px] leading-tight ${
                 active ? "text-blueprint" : "text-ink-soft"
               }`}
             >
-              <Icon size={19} strokeWidth={active ? 2.4 : 2} />
-              {label}
+              <Icon size={18} strokeWidth={active ? 2.4 : 2} />
+              <span className="truncate max-w-full">{label}</span>
             </Link>
           );
         })}

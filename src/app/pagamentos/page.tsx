@@ -184,7 +184,7 @@ export default function PagamentosPage() {
         eyebrow={`Total registrado · ${formatCurrency(total)}`}
         title="Pagamentos"
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setBudgetOpen(true)}
               className="flex items-center gap-2 bg-card border border-line hover:bg-paper text-ink text-sm font-medium px-4 py-2 rounded-md transition-colors"
