@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Activity, ActivityStatus, STATUS_LABELS } from "@/lib/types";
 import { formatDate } from "@/lib/format";
@@ -21,11 +21,15 @@ export default function AtividadesPage() {
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<ActivityStatus>("planejado");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [plannedStart, setPlannedStart] = useState("");
+  const [plannedEnd, setPlannedEnd] = useState("");
   const [saving, setSaving] = useState(false);
 
   // filtros
   const [filterStatus, setFilterStatus] = useState<ActivityStatus | "">("");
   const [search, setSearch] = useState("");
+
+  const today = new Date().toISOString().slice(0, 10);
 
   async function load() {
     setLoading(true);
@@ -47,6 +51,8 @@ export default function AtividadesPage() {
     setDescription("");
     setStatus("planejado");
     setDate(new Date().toISOString().slice(0, 10));
+    setPlannedStart("");
+    setPlannedEnd("");
     setOpen(true);
   }
 
@@ -56,19 +62,26 @@ export default function AtividadesPage() {
     setDescription(a.description ?? "");
     setStatus(a.status);
     setDate(a.date);
+    setPlannedStart(a.planned_start ?? "");
+    setPlannedEnd(a.planned_end ?? "");
     setOpen(true);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
+    const payload = {
+      title,
+      description,
+      status,
+      date,
+      planned_start: plannedStart || null,
+      planned_end: plannedEnd || null,
+    };
     if (editingId) {
-      await supabase
-        .from("activities")
-        .update({ title, description, status, date })
-        .eq("id", editingId);
+      await supabase.from("activities").update(payload).eq("id", editingId);
     } else {
-      await supabase.from("activities").insert({ title, description, status, date });
+      await supabase.from("activities").insert(payload);
     }
     setSaving(false);
     setOpen(false);
@@ -84,6 +97,10 @@ export default function AtividadesPage() {
     if (!confirm("Remover esta atividade?")) return;
     await supabase.from("activities").delete().eq("id", id);
     load();
+  }
+
+  function isLate(a: Activity) {
+    return a.status !== "concluido" && a.planned_end && a.planned_end < today;
   }
 
   const filtered = activities.filter((a) => {
@@ -139,53 +156,69 @@ export default function AtividadesPage() {
           </p>
         ) : (
           <div className="space-y-3 max-w-3xl">
-            {filtered.map((a) => (
-              <div
-                key={a.id}
-                className="bg-card border border-line rounded-lg p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-medium text-ink">{a.title}</h3>
-                    <StatusBadge status={a.status} />
+            {filtered.map((a) => {
+              const late = isLate(a);
+              return (
+                <div
+                  key={a.id}
+                  className={`bg-card border rounded-lg p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between min-w-0 ${
+                    late ? "border-safety/50" : "border-line"
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-medium text-ink">{a.title}</h3>
+                      <StatusBadge status={a.status} />
+                      {late && (
+                        <span className="inline-flex items-center gap-1 text-xs text-safety">
+                          <AlertTriangle size={12} /> Atrasada
+                        </span>
+                      )}
+                    </div>
+                    {a.description && (
+                      <p className="text-sm text-ink-soft mt-1">{a.description}</p>
+                    )}
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-ink-soft font-mono mt-1">
+                      <span>{formatDate(a.date)}</span>
+                      {(a.planned_start || a.planned_end) && (
+                        <span>
+                          Previsto: {a.planned_start ? formatDate(a.planned_start) : "?"} →{" "}
+                          {a.planned_end ? formatDate(a.planned_end) : "?"}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  {a.description && (
-                    <p className="text-sm text-ink-soft mt-1">{a.description}</p>
-                  )}
-                  <p className="text-xs text-ink-soft font-mono mt-1">
-                    {formatDate(a.date)}
-                  </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <select
+                      value={a.status}
+                      onChange={(e) =>
+                        updateStatus(a.id, e.target.value as ActivityStatus)
+                      }
+                      className="text-xs border border-line rounded-md px-2 py-1.5 bg-white"
+                    >
+                      {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => openEdit(a)}
+                      className="text-ink-soft hover:text-blueprint"
+                      aria-label="Editar"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      onClick={() => remove(a.id)}
+                      className="text-xs text-ink-soft hover:text-safety"
+                    >
+                      Remover
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={a.status}
-                    onChange={(e) =>
-                      updateStatus(a.id, e.target.value as ActivityStatus)
-                    }
-                    className="text-xs border border-line rounded-md px-2 py-1.5 bg-white"
-                  >
-                    {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => openEdit(a)}
-                    className="text-ink-soft hover:text-blueprint"
-                    aria-label="Editar"
-                  >
-                    <Pencil size={14} />
-                  </button>
-                  <button
-                    onClick={() => remove(a.id)}
-                    className="text-xs text-ink-soft hover:text-safety"
-                  >
-                    Remover
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -233,11 +266,35 @@ export default function AtividadesPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm text-ink-soft mb-1">Data</label>
+              <label className="block text-sm text-ink-soft mb-1">Data do registro</label>
               <input
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
+                className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm text-ink-soft mb-1">
+                Início previsto
+              </label>
+              <input
+                type="date"
+                value={plannedStart}
+                onChange={(e) => setPlannedStart(e.target.value)}
+                className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-ink-soft mb-1">
+                Fim previsto
+              </label>
+              <input
+                type="date"
+                value={plannedEnd}
+                onChange={(e) => setPlannedEnd(e.target.value)}
                 className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
               />
             </div>

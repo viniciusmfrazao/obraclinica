@@ -6,6 +6,8 @@ export interface Activity {
   description: string | null;
   status: ActivityStatus;
   date: string;
+  planned_start: string | null;
+  planned_end: string | null;
   created_at: string;
 }
 
@@ -59,6 +61,22 @@ export interface Budget {
   category: PaymentCategory | null;
   activity_id: string | null;
   amount: number;
+  created_at: string;
+}
+
+export type InstallmentStatus = "pendente" | "pago";
+
+export interface Installment {
+  id: string;
+  description: string;
+  amount: number;
+  category: PaymentCategory;
+  supplier: string | null;
+  account: string | null;
+  due_date: string;
+  activity_id: string | null;
+  status: InstallmentStatus;
+  paid_payment_id: string | null;
   created_at: string;
 }
 

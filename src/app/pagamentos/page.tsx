@@ -3,9 +3,9 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { Plus, Paperclip, Receipt, Pencil, Target } from "lucide-react";
+import { Plus, Paperclip, Receipt, Pencil, Target, CalendarClock, Check, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { Payment, PaymentCategory, CATEGORY_LABELS, Budget } from "@/lib/types";
+import { Payment, PaymentCategory, CATEGORY_LABELS, Budget, Installment } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useActivities } from "@/lib/use-activities";
 import PageHeader from "@/components/PageHeader";
@@ -16,9 +16,11 @@ const ACCOUNT_SUGGESTIONS = ["Conta corrente", "Cartão de crédito", "Pix", "Di
 export default function PagamentosPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [installments, setInstallments] = useState<Installment[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
+  const [installmentsOpen, setInstallmentsOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const activities = useActivities();
 
@@ -40,6 +42,16 @@ export default function PagamentosPage() {
   const [budgetAmount, setBudgetAmount] = useState("");
   const [savingBudget, setSavingBudget] = useState(false);
 
+  // contas a pagar
+  const [instDescription, setInstDescription] = useState("");
+  const [instAmount, setInstAmount] = useState("");
+  const [instCategory, setInstCategory] = useState<PaymentCategory>("material");
+  const [instSupplier, setInstSupplier] = useState("");
+  const [instAccount, setInstAccount] = useState("");
+  const [instDueDate, setInstDueDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [instActivityId, setInstActivityId] = useState("");
+  const [savingInstallment, setSavingInstallment] = useState(false);
+
   // filtros
   const [filterCategory, setFilterCategory] = useState<PaymentCategory | "">("");
   const [filterActivity, setFilterActivity] = useState("");
@@ -49,12 +61,14 @@ export default function PagamentosPage() {
 
   async function load() {
     setLoading(true);
-    const [p, b] = await Promise.all([
+    const [p, b, i] = await Promise.all([
       supabase.from("payments").select("*").order("date", { ascending: false }),
       supabase.from("budgets").select("*"),
+      supabase.from("installments").select("*").order("due_date", { ascending: true }),
     ]);
     setPayments(p.data ?? []);
     setBudgets(b.data ?? []);
+    setInstallments(i.data ?? []);
     setLoading(false);
   }
 
@@ -157,7 +171,61 @@ export default function PagamentosPage() {
     load();
   }
 
+  async function addInstallment(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingInstallment(true);
+    await supabase.from("installments").insert({
+      description: instDescription,
+      amount: parseFloat(instAmount.replace(",", ".")),
+      category: instCategory,
+      supplier: instSupplier || null,
+      account: instAccount || null,
+      due_date: instDueDate,
+      activity_id: instActivityId || null,
+    });
+    setSavingInstallment(false);
+    setInstDescription("");
+    setInstAmount("");
+    setInstSupplier("");
+    setInstAccount("");
+    setInstActivityId("");
+    setInstDueDate(new Date().toISOString().slice(0, 10));
+    load();
+  }
+
+  async function markInstallmentPaid(inst: Installment) {
+    const { data: payment } = await supabase
+      .from("payments")
+      .insert({
+        description: inst.description,
+        amount: inst.amount,
+        category: inst.category,
+        supplier: inst.supplier,
+        account: inst.account,
+        date: new Date().toISOString().slice(0, 10),
+        activity_id: inst.activity_id,
+      })
+      .select()
+      .single();
+
+    await supabase
+      .from("installments")
+      .update({ status: "pago", paid_payment_id: payment?.id ?? null })
+      .eq("id", inst.id);
+
+    load();
+  }
+
+  async function removeInstallment(id: string) {
+    if (!confirm("Remover esta conta a pagar?")) return;
+    await supabase.from("installments").delete().eq("id", id);
+    load();
+  }
+
   const total = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+  const today = new Date().toISOString().slice(0, 10);
+  const pendingInstallments = installments.filter((i) => i.status === "pendente");
+  const overdueCount = pendingInstallments.filter((i) => i.due_date < today).length;
 
   const filtered = payments.filter((p) => {
     if (filterCategory && p.category !== filterCategory) return false;
@@ -186,6 +254,21 @@ export default function PagamentosPage() {
         action={
           <div className="flex flex-wrap gap-2">
             <button
+              onClick={() => setInstallmentsOpen(true)}
+              className="relative flex items-center gap-2 bg-card border border-line hover:bg-paper text-ink text-sm font-medium px-4 py-2 rounded-md transition-colors"
+            >
+              <CalendarClock size={16} /> Contas a pagar
+              {pendingInstallments.length > 0 && (
+                <span
+                  className={`absolute -top-1.5 -right-1.5 text-[10px] font-mono rounded-full w-4 h-4 flex items-center justify-center text-white ${
+                    overdueCount > 0 ? "bg-safety" : "bg-blueprint"
+                  }`}
+                >
+                  {pendingInstallments.length}
+                </span>
+              )}
+            </button>
+            <button
               onClick={() => setBudgetOpen(true)}
               className="flex items-center gap-2 bg-card border border-line hover:bg-paper text-ink text-sm font-medium px-4 py-2 rounded-md transition-colors"
             >
@@ -202,6 +285,14 @@ export default function PagamentosPage() {
       />
 
       <div className="px-6 md:px-10 py-8">
+        {overdueCount > 0 && (
+          <div className="bg-safety/10 border border-safety/40 rounded-lg px-4 py-3 mb-6 max-w-4xl flex items-center gap-2 text-sm text-safety">
+            <CalendarClock size={16} className="shrink-0" />
+            {overdueCount} conta{overdueCount > 1 ? "s" : ""} a pagar vencida
+            {overdueCount > 1 ? "s" : ""} — confira em &quot;Contas a pagar&quot;
+          </div>
+        )}
+
         {budgets.length > 0 && (
           <div className="bg-card border border-line rounded-lg p-5 mb-6 max-w-4xl min-w-0">
             <h2 className="font-display font-semibold text-ink mb-4">
@@ -560,6 +651,140 @@ export default function PagamentosPage() {
                   </span>
                 </div>
               ))}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={installmentsOpen}
+        onClose={() => setInstallmentsOpen(false)}
+        title="Contas a pagar"
+      >
+        <form onSubmit={addInstallment} className="space-y-4 mb-6">
+          <div>
+            <label className="block text-sm text-ink-soft mb-1">Descrição</label>
+            <input
+              required
+              value={instDescription}
+              onChange={(e) => setInstDescription(e.target.value)}
+              placeholder="Ex: Parcela 2/3 do material elétrico"
+              className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blueprint"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm text-ink-soft mb-1">Valor (R$)</label>
+              <input
+                required
+                inputMode="decimal"
+                value={instAmount}
+                onChange={(e) => setInstAmount(e.target.value)}
+                placeholder="0,00"
+                className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blueprint"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-ink-soft mb-1">Vencimento</label>
+              <input
+                type="date"
+                value={instDueDate}
+                onChange={(e) => setInstDueDate(e.target.value)}
+                className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm text-ink-soft mb-1">Categoria</label>
+              <select
+                value={instCategory}
+                onChange={(e) => setInstCategory(e.target.value as PaymentCategory)}
+                className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
+              >
+                {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm text-ink-soft mb-1">Fornecedor</label>
+              <input
+                value={instSupplier}
+                onChange={(e) => setInstSupplier(e.target.value)}
+                className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm text-ink-soft mb-1">
+              Atividade relacionada (opcional)
+            </label>
+            <select
+              value={instActivityId}
+              onChange={(e) => setInstActivityId(e.target.value)}
+              className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
+            >
+              <option value="">Nenhuma</option>
+              {activities.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.title}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="submit"
+            disabled={savingInstallment}
+            className="w-full bg-blueprint hover:bg-blueprint-dark text-white font-medium py-2.5 rounded-md transition-colors disabled:opacity-60"
+          >
+            {savingInstallment ? "Salvando…" : "Adicionar conta"}
+          </button>
+        </form>
+
+        {pendingInstallments.length > 0 && (
+          <div className="border-t border-line pt-4 space-y-2">
+            <p className="text-xs uppercase tracking-wide text-ink-soft mb-2">
+              Pendentes
+            </p>
+            {pendingInstallments.map((inst) => {
+              const overdue = inst.due_date < today;
+              return (
+                <div
+                  key={inst.id}
+                  className={`flex items-center justify-between gap-2 rounded-md border p-2.5 min-w-0 ${
+                    overdue ? "border-safety/40 bg-safety/5" : "border-line"
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-ink truncate">{inst.description}</p>
+                    <p
+                      className={`text-xs font-mono ${overdue ? "text-safety" : "text-ink-soft"}`}
+                    >
+                      {formatCurrency(Number(inst.amount))} · vence {formatDate(inst.due_date)}
+                      {overdue ? " · vencida" : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => markInstallmentPaid(inst)}
+                      title="Marcar como paga"
+                      className="text-success hover:opacity-70"
+                    >
+                      <Check size={16} />
+                    </button>
+                    <button
+                      onClick={() => removeInstallment(inst.id)}
+                      title="Remover"
+                      className="text-ink-soft hover:text-safety"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </Modal>
