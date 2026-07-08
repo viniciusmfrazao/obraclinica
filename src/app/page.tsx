@@ -90,7 +90,7 @@ export default function DashboardPage() {
           <p className="text-ink-soft text-sm font-mono">Carregando...</p>
         ) : (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 min-w-0">
               <StatCard
                 icon={<Wallet size={16} />}
                 label="Total gasto"
@@ -119,8 +119,8 @@ export default function DashboardPage() {
               />
             </div>
 
-            <div className="grid lg:grid-cols-2 gap-6">
-              <div className="bg-card border border-line rounded-lg p-5">
+            <div className="grid lg:grid-cols-2 gap-6 min-w-0">
+              <div className="bg-card border border-line rounded-lg p-5 min-w-0">
                 <h2 className="font-display font-semibold text-ink mb-4">
                   Gastos por categoria
                 </h2>
@@ -133,12 +133,12 @@ export default function DashboardPage() {
                     {Object.entries(byCategory)
                       .sort((a, b) => b[1] - a[1])
                       .map(([cat, value]) => (
-                        <div key={cat}>
-                          <div className="flex justify-between text-xs mb-1">
-                            <span className="text-ink-soft">
+                        <div key={cat} className="min-w-0">
+                          <div className="flex justify-between gap-2 text-xs mb-1 min-w-0">
+                            <span className="text-ink-soft truncate">
                               {CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS]}
                             </span>
-                            <span className="font-mono text-ink">
+                            <span className="font-mono text-ink shrink-0">
                               {formatCurrency(value)}
                             </span>
                           </div>
@@ -154,14 +154,14 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              <div className="bg-card border border-line rounded-lg p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="font-display font-semibold text-ink">
+              <div className="bg-card border border-line rounded-lg p-5 min-w-0">
+                <div className="flex items-center justify-between gap-2 mb-4 min-w-0">
+                  <h2 className="font-display font-semibold text-ink truncate">
                     Etapas da obra
                   </h2>
                   <Link
                     href="/atividades"
-                    className="text-xs text-blueprint hover:underline flex items-center gap-1"
+                    className="text-xs text-blueprint hover:underline flex items-center gap-1 shrink-0"
                   >
                     Ver todas <ArrowRight size={12} />
                   </Link>
@@ -175,12 +175,14 @@ export default function DashboardPage() {
                     {activities.slice(0, 5).map((a) => (
                       <div
                         key={a.id}
-                        className="flex items-center justify-between gap-2"
+                        className="flex items-center justify-between gap-2 min-w-0"
                       >
                         <span className="text-sm text-ink truncate">
                           {a.title}
                         </span>
-                        <StatusBadge status={a.status} />
+                        <span className="shrink-0">
+                          <StatusBadge status={a.status} />
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -193,7 +195,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="bg-card border border-line rounded-lg p-5">
+            <div className="bg-card border border-line rounded-lg p-5 min-w-0">
               <h2 className="font-display font-semibold text-ink mb-4">
                 Ultimos registros
               </h2>
@@ -207,12 +209,12 @@ export default function DashboardPage() {
                   {recentActivity.map((item, i) => (
                     <li
                       key={i}
-                      className="flex items-center gap-3 py-2.5 border-b border-line/60 last:border-0"
+                      className="flex items-center gap-3 py-2.5 border-b border-line/60 last:border-0 min-w-0"
                     >
                       <span className="text-[10px] font-mono uppercase tracking-wide text-blueprint bg-blueprint/10 rounded px-1.5 py-0.5 shrink-0">
                         {item.sub}
                       </span>
-                      <span className="text-sm text-ink truncate flex-1">
+                      <span className="text-sm text-ink truncate flex-1 min-w-0">
                         {item.label}
                       </span>
                       <span className="text-xs text-ink-soft font-mono shrink-0">
@@ -242,13 +244,13 @@ function StatCard({
   mono?: boolean;
 }) {
   return (
-    <div className="bg-card border border-line rounded-lg p-4">
-      <div className="flex items-center gap-1.5 text-ink-soft mb-2">
+    <div className="bg-card border border-line rounded-lg p-4 min-w-0">
+      <div className="flex items-center gap-1.5 text-ink-soft mb-2 min-w-0">
         {icon}
-        <span className="text-xs">{label}</span>
+        <span className="text-xs truncate">{label}</span>
       </div>
       <p
-        className={`text-lg font-semibold text-ink ${mono ? "font-mono" : "font-display"}`}
+        className={`text-lg font-semibold text-ink truncate ${mono ? "font-mono" : "font-display"}`}
       >
         {value}
       </p>

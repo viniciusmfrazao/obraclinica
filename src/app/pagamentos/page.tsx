@@ -203,11 +203,11 @@ export default function PagamentosPage() {
 
       <div className="px-6 md:px-10 py-8">
         {budgets.length > 0 && (
-          <div className="bg-card border border-line rounded-lg p-5 mb-6 max-w-4xl">
+          <div className="bg-card border border-line rounded-lg p-5 mb-6 max-w-4xl min-w-0">
             <h2 className="font-display font-semibold text-ink mb-4">
               Orçamento por categoria
             </h2>
-            <div className="grid sm:grid-cols-2 gap-4">
+            <div className="grid sm:grid-cols-2 gap-4 min-w-0">
               {budgets
                 .filter((b) => b.category)
                 .map((b) => {
@@ -215,9 +215,9 @@ export default function PagamentosPage() {
                   const pct = Math.min(100, (spent / Number(b.amount)) * 100);
                   const over = spent > Number(b.amount);
                   return (
-                    <div key={b.id}>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="text-ink-soft">
+                    <div key={b.id} className="min-w-0">
+                      <div className="flex justify-between gap-2 text-xs mb-1 flex-wrap min-w-0">
+                        <span className="text-ink-soft truncate">
                           {CATEGORY_LABELS[b.category as PaymentCategory]}
                         </span>
                         <span className={`font-mono ${over ? "text-safety" : "text-ink"}`}>
