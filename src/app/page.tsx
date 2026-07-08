@@ -4,9 +4,9 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Wallet, ListChecks, FileText, Images, ArrowRight } from "lucide-react";
+import { Wallet, ListChecks, FileText, Images, ShoppingCart, ArrowRight } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { Activity, Payment, Doc, Photo, CATEGORY_LABELS } from "@/lib/types";
+import { Activity, Payment, Doc, Photo, ShoppingItem, CATEGORY_LABELS } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/format";
 import PageHeader from "@/components/PageHeader";
 import StatusBadge from "@/components/StatusBadge";
@@ -16,20 +16,23 @@ export default function DashboardPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
+  const [shopping, setShopping] = useState<ShoppingItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const [a, p, d, f] = await Promise.all([
+      const [a, p, d, f, s] = await Promise.all([
         supabase.from("activities").select("*").order("date", { ascending: false }),
         supabase.from("payments").select("*").order("date", { ascending: false }),
         supabase.from("documents").select("*").order("date", { ascending: false }),
         supabase.from("photos").select("*").order("date", { ascending: false }),
+        supabase.from("shopping_list_items").select("*"),
       ]);
       setActivities(a.data ?? []);
       setPayments(p.data ?? []);
       setDocs(d.data ?? []);
       setPhotos(f.data ?? []);
+      setShopping(s.data ?? []);
       setLoading(false);
     }
     load();
@@ -87,7 +90,7 @@ export default function DashboardPage() {
           <p className="text-ink-soft text-sm font-mono">Carregando...</p>
         ) : (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
               <StatCard
                 icon={<Wallet size={16} />}
                 label="Total gasto"
@@ -98,6 +101,11 @@ export default function DashboardPage() {
                 icon={<ListChecks size={16} />}
                 label="Atividades"
                 value={`${done}/${activities.length} concluidas`}
+              />
+              <StatCard
+                icon={<ShoppingCart size={16} />}
+                label="Compras pendentes"
+                value={String(shopping.filter((s) => !s.done).length)}
               />
               <StatCard
                 icon={<FileText size={16} />}

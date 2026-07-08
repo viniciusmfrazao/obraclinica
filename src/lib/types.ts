@@ -54,6 +54,17 @@ export interface Photo {
   created_at: string;
 }
 
+export interface ShoppingItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  estimated_price: number | null;
+  done: boolean;
+  activity_id: string | null;
+  created_at: string;
+}
+
 export const STATUS_LABELS: Record<ActivityStatus, string> = {
   planejado: "Planejado",
   em_andamento: "Em andamento",

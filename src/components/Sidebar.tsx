@@ -8,6 +8,7 @@ import {
   Wallet,
   FileText,
   Images,
+  ShoppingCart,
   LogOut,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -16,6 +17,7 @@ const NAV = [
   { href: "/", label: "Painel", icon: LayoutDashboard },
   { href: "/atividades", label: "Atividades", icon: ListChecks },
   { href: "/pagamentos", label: "Pagamentos", icon: Wallet },
+  { href: "/lista-compras", label: "Compras", icon: ShoppingCart },
   { href: "/documentos", label: "Documentos", icon: FileText },
   { href: "/fotos", label: "Fotos", icon: Images },
 ];
