@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState } from "react";
 import { Plus, FileText, Download, Pencil, FolderPlus, Folder as FolderIcon } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useOrg } from "@/lib/org-context";
 import { Doc, DocumentCategory, DOC_CATEGORY_LABELS, Folder } from "@/lib/types";
 import { formatDate } from "@/lib/format";
 import { useActivities } from "@/lib/use-activities";
@@ -12,6 +13,7 @@ import PageHeader from "@/components/PageHeader";
 import Modal from "@/components/Modal";
 
 export default function DocumentosPage() {
+  const { currentOrgId } = useOrg();
   const [docs, setDocs] = useState<Doc[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,10 +38,11 @@ export default function DocumentosPage() {
   const [search, setSearch] = useState("");
 
   async function load() {
+    if (!currentOrgId) return;
     setLoading(true);
     const [d, f] = await Promise.all([
-      supabase.from("documents").select("*").order("date", { ascending: false }),
-      supabase.from("folders").select("*").order("name"),
+      supabase.from("documents").select("*").eq("organization_id", currentOrgId).order("date", { ascending: false }),
+      supabase.from("folders").select("*").eq("organization_id", currentOrgId).order("name"),
     ]);
     setDocs(d.data ?? []);
     setFolders(f.data ?? []);
@@ -48,7 +51,7 @@ export default function DocumentosPage() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [currentOrgId]);
 
   function openNew() {
     setEditingId(null);
@@ -92,7 +95,7 @@ export default function DocumentosPage() {
         setSaving(false);
         return;
       }
-      const path = `${Date.now()}-${file.name}`;
+      const path = `${currentOrgId}/${Date.now()}-${file.name}`;
       const { error } = await supabase.storage.from("documents").upload(path, file);
       if (!error) {
         await supabase.from("documents").insert({
@@ -102,6 +105,7 @@ export default function DocumentosPage() {
           activity_id: activityId || null,
           folder_id: folderId || null,
           file_path: path,
+          organization_id: currentOrgId,
         });
       }
     }
@@ -118,7 +122,7 @@ export default function DocumentosPage() {
     e.preventDefault();
     if (!newFolderName.trim()) return;
     setSavingFolder(true);
-    await supabase.from("folders").insert({ name: newFolderName.trim() });
+    await supabase.from("folders").insert({ name: newFolderName.trim(), organization_id: currentOrgId });
     setSavingFolder(false);
     setNewFolderName("");
     setFolderModalOpen(false);

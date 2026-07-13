@@ -29,6 +29,7 @@ import {
   PenLine,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useOrg } from "@/lib/org-context";
 import {
   Activity,
   DailyReport,
@@ -93,6 +94,7 @@ function SectionCard({
 export default function RdoDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const { currentOrgId } = useOrg();
   const id = params?.id;
 
   const [report, setReport] = useState<DailyReport | null>(null);
@@ -131,7 +133,7 @@ export default function RdoDetailPage() {
   const locked = report?.status === "finalizado";
 
   const load = useCallback(async () => {
-    if (!id) return;
+    if (!id || !currentOrgId) return;
     const [r, l, e, ra, o, m, a] = await Promise.all([
       supabase.from("daily_reports").select("*").eq("id", id).single(),
       supabase.from("report_labor").select("*").eq("report_id", id).order("created_at"),
@@ -139,7 +141,7 @@ export default function RdoDetailPage() {
       supabase.from("report_activities").select("*").eq("report_id", id).order("created_at"),
       supabase.from("report_occurrences").select("*").eq("report_id", id).order("created_at"),
       supabase.from("report_materials").select("*").eq("report_id", id).order("created_at"),
-      supabase.from("activities").select("*").order("date", { ascending: false }),
+      supabase.from("activities").select("*").eq("organization_id", currentOrgId).order("date", { ascending: false }),
     ]);
     setReport(r.data ?? null);
     setLabor(l.data ?? []);
@@ -153,6 +155,7 @@ export default function RdoDetailPage() {
       const { data: ph } = await supabase
         .from("photos")
         .select("*")
+        .eq("organization_id", currentOrgId)
         .eq("date", r.data.report_date)
         .order("created_at");
       setPhotos(ph ?? []);
@@ -167,7 +170,7 @@ export default function RdoDetailPage() {
       setPhotoUrls(Object.fromEntries(entries));
     }
     setLoading(false);
-  }, [id]);
+  }, [id, currentOrgId]);
 
   useEffect(() => {
     load();
@@ -198,10 +201,11 @@ export default function RdoDetailPage() {
   }
 
   async function copyFromPrevious(kind: "labor" | "equipment") {
-    if (!report) return;
+    if (!report || !currentOrgId) return;
     const { data: prev } = await supabase
       .from("daily_reports")
       .select("id")
+      .eq("organization_id", currentOrgId)
       .lt("report_date", report.report_date)
       .order("report_date", { ascending: false })
       .limit(1)
@@ -218,16 +222,16 @@ export default function RdoDetailPage() {
     }
     const payload = rows.map((row) =>
       kind === "labor"
-        ? { report_id: report.id, role: row.role, quantity: row.quantity, note: row.note }
-        : { report_id: report.id, name: row.name, quantity: row.quantity, note: row.note }
+        ? { report_id: report.id, role: row.role, quantity: row.quantity, note: row.note, organization_id: currentOrgId }
+        : { report_id: report.id, name: row.name, quantity: row.quantity, note: row.note, organization_id: currentOrgId }
     );
     await supabase.from(table).insert(payload);
     load();
   }
 
   async function addRow(table: string, payload: Record<string, unknown>, reset: () => void) {
-    if (!report) return;
-    await supabase.from(table).insert({ report_id: report.id, ...payload });
+    if (!report || !currentOrgId) return;
+    await supabase.from(table).insert({ report_id: report.id, organization_id: currentOrgId, ...payload });
     reset();
     load();
   }
@@ -238,22 +242,24 @@ export default function RdoDetailPage() {
   }
 
   async function uploadPhotos(files: FileList | null) {
-    if (!files || !report) return;
+    if (!files || !report || !currentOrgId) return;
     setUploading(true);
     for (const file of Array.from(files)) {
-      const path = `${Date.now()}-${file.name}`;
+      const path = `${currentOrgId}/${Date.now()}-${file.name}`;
       const { error } = await supabase.storage.from("photos").upload(path, file);
       if (!error) {
         await supabase.from("photos").insert({
           description: `RDO nº ${String(report.report_number).padStart(3, "0")}`,
           date: report.report_date,
           photo_path: path,
+          organization_id: currentOrgId,
         });
       }
     }
     setUploading(false);
     load();
   }
+
 
   async function finalize() {
     if (!signName.trim()) return;

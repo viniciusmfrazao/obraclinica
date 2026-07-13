@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState } from "react";
 import { Plus, Pencil, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useOrg } from "@/lib/org-context";
 import { Activity, ActivityStatus, STATUS_LABELS } from "@/lib/types";
 import { formatDate } from "@/lib/format";
 import PageHeader from "@/components/PageHeader";
@@ -12,6 +13,7 @@ import Modal from "@/components/Modal";
 import StatusBadge from "@/components/StatusBadge";
 
 export default function AtividadesPage() {
+  const { currentOrgId } = useOrg();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -32,10 +34,12 @@ export default function AtividadesPage() {
   const today = new Date().toISOString().slice(0, 10);
 
   async function load() {
+    if (!currentOrgId) return;
     setLoading(true);
     const { data } = await supabase
       .from("activities")
       .select("*")
+      .eq("organization_id", currentOrgId)
       .order("date", { ascending: false });
     setActivities(data ?? []);
     setLoading(false);
@@ -43,7 +47,7 @@ export default function AtividadesPage() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [currentOrgId]);
 
   function openNew() {
     setEditingId(null);
@@ -77,6 +81,7 @@ export default function AtividadesPage() {
       date,
       planned_start: plannedStart || null,
       planned_end: plannedEnd || null,
+      organization_id: currentOrgId,
     };
     if (editingId) {
       await supabase.from("activities").update(payload).eq("id", editingId);

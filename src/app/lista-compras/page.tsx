@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState } from "react";
 import { Plus, Check, Trash2, Pencil } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useOrg } from "@/lib/org-context";
 import { ShoppingItem } from "@/lib/types";
 import { formatCurrency } from "@/lib/format";
 import { useActivities } from "@/lib/use-activities";
@@ -12,6 +13,7 @@ import PageHeader from "@/components/PageHeader";
 import Modal from "@/components/Modal";
 
 export default function ListaDeComprasPage() {
+  const { currentOrgId } = useOrg();
   const [items, setItems] = useState<ShoppingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -26,10 +28,12 @@ export default function ListaDeComprasPage() {
   const [saving, setSaving] = useState(false);
 
   async function load() {
+    if (!currentOrgId) return;
     setLoading(true);
     const { data } = await supabase
       .from("shopping_list_items")
       .select("*")
+      .eq("organization_id", currentOrgId)
       .order("done", { ascending: true })
       .order("created_at", { ascending: false });
     setItems(data ?? []);
@@ -38,7 +42,7 @@ export default function ListaDeComprasPage() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [currentOrgId]);
 
   function openNew() {
     setEditingId(null);
@@ -71,6 +75,7 @@ export default function ListaDeComprasPage() {
         ? parseFloat(estimatedPrice.replace(",", "."))
         : null,
       activity_id: activityId || null,
+      organization_id: currentOrgId,
     };
     if (editingId) {
       await supabase.from("shopping_list_items").update(payload).eq("id", editingId);

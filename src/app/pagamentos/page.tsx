@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState } from "react";
 import { Plus, Paperclip, Receipt, Pencil, Target, CalendarClock, Check, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useOrg } from "@/lib/org-context";
 import { Payment, PaymentCategory, CATEGORY_LABELS, Budget, Installment } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useActivities } from "@/lib/use-activities";
@@ -14,6 +15,7 @@ import Modal from "@/components/Modal";
 const ACCOUNT_SUGGESTIONS = ["Conta corrente", "Cartão de crédito", "Pix", "Dinheiro"];
 
 export default function PagamentosPage() {
+  const { currentOrgId } = useOrg();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [installments, setInstallments] = useState<Installment[]>([]);
@@ -60,11 +62,12 @@ export default function PagamentosPage() {
   const [search, setSearch] = useState("");
 
   async function load() {
+    if (!currentOrgId) return;
     setLoading(true);
     const [p, b, i] = await Promise.all([
-      supabase.from("payments").select("*").order("date", { ascending: false }),
-      supabase.from("budgets").select("*"),
-      supabase.from("installments").select("*").order("due_date", { ascending: true }),
+      supabase.from("payments").select("*").eq("organization_id", currentOrgId).order("date", { ascending: false }),
+      supabase.from("budgets").select("*").eq("organization_id", currentOrgId),
+      supabase.from("installments").select("*").eq("organization_id", currentOrgId).order("due_date", { ascending: true }),
     ]);
     setPayments(p.data ?? []);
     setBudgets(b.data ?? []);
@@ -74,11 +77,11 @@ export default function PagamentosPage() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [currentOrgId]);
 
   async function uploadIfPresent(file: File | null) {
-    if (!file) return null;
-    const path = `${Date.now()}-${file.name}`;
+    if (!file || !currentOrgId) return null;
+    const path = `${currentOrgId}/${Date.now()}-${file.name}`;
     const { error } = await supabase.storage.from("documents").upload(path, file);
     return error ? null : path;
   }
@@ -132,6 +135,7 @@ export default function PagamentosPage() {
       activity_id: activityId || null,
       receipt_path,
       invoice_path,
+      organization_id: currentOrgId,
     };
 
     if (editingId) {
@@ -164,7 +168,9 @@ export default function PagamentosPage() {
     if (existing) {
       await supabase.from("budgets").update({ amount: value }).eq("id", existing.id);
     } else {
-      await supabase.from("budgets").insert({ category: budgetCategory, amount: value });
+      await supabase
+        .from("budgets")
+        .insert({ category: budgetCategory, amount: value, organization_id: currentOrgId });
     }
     setSavingBudget(false);
     setBudgetAmount("");
@@ -182,6 +188,7 @@ export default function PagamentosPage() {
       account: instAccount || null,
       due_date: instDueDate,
       activity_id: instActivityId || null,
+      organization_id: currentOrgId,
     });
     setSavingInstallment(false);
     setInstDescription("");
@@ -204,6 +211,7 @@ export default function PagamentosPage() {
         account: inst.account,
         date: new Date().toISOString().slice(0, 10),
         activity_id: inst.activity_id,
+        organization_id: currentOrgId,
       })
       .select()
       .single();

@@ -20,6 +20,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useOrg } from "@/lib/org-context";
 import {
   DailyReport,
   ReportLabor,
@@ -59,6 +60,7 @@ function monthLabel(dateStr: string) {
 
 export default function DiarioPage() {
   const router = useRouter();
+  const { currentOrgId } = useOrg();
   const [reports, setReports] = useState<DailyReport[]>([]);
   const [labor, setLabor] = useState<ReportLabor[]>([]);
   const [occurrences, setOccurrences] = useState<ReportOccurrence[]>([]);
@@ -70,11 +72,12 @@ export default function DiarioPage() {
   const today = new Date().toISOString().slice(0, 10);
 
   async function load() {
+    if (!currentOrgId) return;
     setLoading(true);
     const [r, l, o] = await Promise.all([
-      supabase.from("daily_reports").select("*").order("report_date", { ascending: false }),
-      supabase.from("report_labor").select("*"),
-      supabase.from("report_occurrences").select("*").order("created_at", { ascending: false }),
+      supabase.from("daily_reports").select("*").eq("organization_id", currentOrgId).order("report_date", { ascending: false }),
+      supabase.from("report_labor").select("*").eq("organization_id", currentOrgId),
+      supabase.from("report_occurrences").select("*").eq("organization_id", currentOrgId).order("created_at", { ascending: false }),
     ]);
     setReports(r.data ?? []);
     setLabor(l.data ?? []);
@@ -84,7 +87,7 @@ export default function DiarioPage() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [currentOrgId]);
 
   const laborByReport = useMemo(() => {
     const map: Record<string, number> = {};
@@ -119,6 +122,7 @@ export default function DiarioPage() {
   const todayReport = reports.find((r) => r.report_date === today);
 
   async function createReport(date: string) {
+    if (!currentOrgId) return;
     const existing = reports.find((r) => r.report_date === date);
     if (existing) {
       router.push(`/diario/${existing.id}`);
@@ -128,7 +132,7 @@ export default function DiarioPage() {
     const nextNumber = reports.reduce((max, r) => Math.max(max, r.report_number), 0) + 1;
     const { data, error } = await supabase
       .from("daily_reports")
-      .insert({ report_date: date, report_number: nextNumber })
+      .insert({ report_date: date, report_number: nextNumber, organization_id: currentOrgId })
       .select()
       .single();
     setCreating(false);

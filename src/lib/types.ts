@@ -2,6 +2,7 @@ export type ActivityStatus = "planejado" | "em_andamento" | "concluido";
 
 export interface Activity {
   id: string;
+  organization_id: string;
   title: string;
   description: string | null;
   status: ActivityStatus;
@@ -20,6 +21,7 @@ export type PaymentCategory =
 
 export interface Payment {
   id: string;
+  organization_id: string;
   description: string;
   amount: number;
   category: PaymentCategory;
@@ -41,6 +43,7 @@ export type DocumentCategory =
 
 export interface Doc {
   id: string;
+  organization_id: string;
   name: string;
   category: DocumentCategory;
   file_path: string;
@@ -52,12 +55,14 @@ export interface Doc {
 
 export interface Folder {
   id: string;
+  organization_id: string;
   name: string;
   created_at: string;
 }
 
 export interface Budget {
   id: string;
+  organization_id: string;
   category: PaymentCategory | null;
   activity_id: string | null;
   amount: number;
@@ -68,6 +73,7 @@ export type InstallmentStatus = "pendente" | "pago";
 
 export interface Installment {
   id: string;
+  organization_id: string;
   description: string;
   amount: number;
   category: PaymentCategory;
@@ -82,6 +88,7 @@ export interface Installment {
 
 export interface Photo {
   id: string;
+  organization_id: string;
   description: string | null;
   photo_path: string;
   activity_id: string | null;
@@ -91,6 +98,7 @@ export interface Photo {
 
 export interface ShoppingItem {
   id: string;
+  organization_id: string;
   name: string;
   quantity: number;
   unit: string;
@@ -131,6 +139,7 @@ export type ReportStatus = "rascunho" | "finalizado";
 
 export interface DailyReport {
   id: string;
+  organization_id: string;
   report_number: number;
   report_date: string;
   weather_morning: WeatherCondition | null;
@@ -152,6 +161,7 @@ export interface DailyReport {
 
 export interface ReportLabor {
   id: string;
+  organization_id: string;
   report_id: string;
   role: string;
   quantity: number;
@@ -161,6 +171,7 @@ export interface ReportLabor {
 
 export interface ReportEquipment {
   id: string;
+  organization_id: string;
   report_id: string;
   name: string;
   quantity: number;
@@ -172,6 +183,7 @@ export type ReportActivityStatus = "iniciada" | "em_andamento" | "concluida" | "
 
 export interface ReportActivity {
   id: string;
+  organization_id: string;
   report_id: string;
   activity_id: string | null;
   description: string;
@@ -192,6 +204,7 @@ export type OccurrenceType =
 
 export interface ReportOccurrence {
   id: string;
+  organization_id: string;
   report_id: string;
   type: OccurrenceType;
   description: string;
@@ -203,6 +216,7 @@ export interface ReportOccurrence {
 
 export interface ReportMaterial {
   id: string;
+  organization_id: string;
   report_id: string;
   name: string;
   quantity: string | null;

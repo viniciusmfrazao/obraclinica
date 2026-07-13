@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Space_Grotesk, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
+import { OrgProvider } from "@/lib/org-context";
 import AppShell from "@/components/AppShell";
 import RegisterSW from "@/components/RegisterSW";
 
@@ -60,7 +61,9 @@ export default function RootLayout({
       <body className="min-h-full bg-paper">
         <RegisterSW />
         <AuthProvider>
-          <AppShell>{children}</AppShell>
+          <OrgProvider>
+            <AppShell>{children}</AppShell>
+          </OrgProvider>
         </AuthProvider>
       </body>
     </html>

@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState } from "react";
 import { Plus, Camera, LayoutGrid, GitCommitVertical } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useOrg } from "@/lib/org-context";
 import { Photo, Activity } from "@/lib/types";
 import { formatDate, formatDateLong } from "@/lib/format";
 import { useActivities } from "@/lib/use-activities";
@@ -15,6 +16,7 @@ import StatusBadge from "@/components/StatusBadge";
 type View = "grid" | "timeline";
 
 export default function FotosPage() {
+  const { currentOrgId } = useOrg();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [activities, setActivitiesState] = useState<Activity[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -30,10 +32,11 @@ export default function FotosPage() {
   const [saving, setSaving] = useState(false);
 
   async function load() {
+    if (!currentOrgId) return;
     setLoading(true);
     const [p, a] = await Promise.all([
-      supabase.from("photos").select("*").order("date", { ascending: false }),
-      supabase.from("activities").select("*").order("date", { ascending: true }),
+      supabase.from("photos").select("*").eq("organization_id", currentOrgId).order("date", { ascending: false }),
+      supabase.from("activities").select("*").eq("organization_id", currentOrgId).order("date", { ascending: true }),
     ]);
     setPhotos(p.data ?? []);
     setActivitiesState(a.data ?? []);
@@ -54,15 +57,15 @@ export default function FotosPage() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [currentOrgId]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (files.length === 0) return;
+    if (files.length === 0 || !currentOrgId) return;
     setSaving(true);
 
     for (const file of files) {
-      const path = `${Date.now()}-${file.name}`;
+      const path = `${currentOrgId}/${Date.now()}-${file.name}`;
       const { error } = await supabase.storage.from("photos").upload(path, file);
       if (!error) {
         await supabase.from("photos").insert({
@@ -70,6 +73,7 @@ export default function FotosPage() {
           date,
           activity_id: activityId || null,
           photo_path: path,
+          organization_id: currentOrgId,
         });
       }
     }

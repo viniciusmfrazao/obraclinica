@@ -6,12 +6,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Wallet, ListChecks, FileText, Images, ShoppingCart, ArrowRight, BookOpen, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useOrg } from "@/lib/org-context";
 import { Activity, Payment, Doc, Photo, ShoppingItem, DailyReport, CATEGORY_LABELS } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/format";
 import PageHeader from "@/components/PageHeader";
 import StatusBadge from "@/components/StatusBadge";
 
 export default function DashboardPage() {
+  const { currentOrgId } = useOrg();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -22,15 +24,18 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function load() {
+      if (!currentOrgId) return;
+      setLoading(true);
       const [a, p, d, f, s, r] = await Promise.all([
-        supabase.from("activities").select("*").order("date", { ascending: false }),
-        supabase.from("payments").select("*").order("date", { ascending: false }),
-        supabase.from("documents").select("*").order("date", { ascending: false }),
-        supabase.from("photos").select("*").order("date", { ascending: false }),
-        supabase.from("shopping_list_items").select("*"),
+        supabase.from("activities").select("*").eq("organization_id", currentOrgId).order("date", { ascending: false }),
+        supabase.from("payments").select("*").eq("organization_id", currentOrgId).order("date", { ascending: false }),
+        supabase.from("documents").select("*").eq("organization_id", currentOrgId).order("date", { ascending: false }),
+        supabase.from("photos").select("*").eq("organization_id", currentOrgId).order("date", { ascending: false }),
+        supabase.from("shopping_list_items").select("*").eq("organization_id", currentOrgId),
         supabase
           .from("daily_reports")
           .select("*")
+          .eq("organization_id", currentOrgId)
           .eq("report_date", new Date().toISOString().slice(0, 10))
           .maybeSingle(),
       ]);
@@ -43,7 +48,7 @@ export default function DashboardPage() {
       setLoading(false);
     }
     load();
-  }, []);
+  }, [currentOrgId]);
 
   const totalSpent = payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const inProgress = activities.filter((a) => a.status === "em_andamento").length;
