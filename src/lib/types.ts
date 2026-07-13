@@ -121,3 +121,117 @@ export const DOC_CATEGORY_LABELS: Record<DocumentCategory, string> = {
   alvara: "Alvará",
   outros: "Outros",
 };
+
+// ---------------------------------------------------------------------------
+// Diário de Obra (RDO)
+// ---------------------------------------------------------------------------
+
+export type WeatherCondition = "sol" | "parcial" | "nublado" | "chuva" | "chuva_forte";
+export type ReportStatus = "rascunho" | "finalizado";
+
+export interface DailyReport {
+  id: string;
+  report_number: number;
+  report_date: string;
+  weather_morning: WeatherCondition | null;
+  weather_afternoon: WeatherCondition | null;
+  workable_morning: boolean;
+  workable_afternoon: boolean;
+  temp_min: number | null;
+  temp_max: number | null;
+  rain_mm: number | null;
+  work_start: string | null;
+  work_end: string | null;
+  summary: string | null;
+  notes: string | null;
+  status: ReportStatus;
+  signed_by: string | null;
+  finalized_at: string | null;
+  created_at: string;
+}
+
+export interface ReportLabor {
+  id: string;
+  report_id: string;
+  role: string;
+  quantity: number;
+  note: string | null;
+  created_at: string;
+}
+
+export interface ReportEquipment {
+  id: string;
+  report_id: string;
+  name: string;
+  quantity: number;
+  note: string | null;
+  created_at: string;
+}
+
+export type ReportActivityStatus = "iniciada" | "em_andamento" | "concluida" | "paralisada";
+
+export interface ReportActivity {
+  id: string;
+  report_id: string;
+  activity_id: string | null;
+  description: string;
+  status: ReportActivityStatus;
+  progress: number;
+  created_at: string;
+}
+
+export type OccurrenceType =
+  | "clima"
+  | "atraso"
+  | "acidente"
+  | "visita"
+  | "entrega"
+  | "nao_conformidade"
+  | "paralisacao"
+  | "outros";
+
+export interface ReportOccurrence {
+  id: string;
+  report_id: string;
+  type: OccurrenceType;
+  description: string;
+  is_pending: boolean;
+  resolved: boolean;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export interface ReportMaterial {
+  id: string;
+  report_id: string;
+  name: string;
+  quantity: string | null;
+  supplier: string | null;
+  created_at: string;
+}
+
+export const WEATHER_LABELS: Record<WeatherCondition, string> = {
+  sol: "Sol",
+  parcial: "Parcialmente nublado",
+  nublado: "Nublado",
+  chuva: "Chuva",
+  chuva_forte: "Chuva forte",
+};
+
+export const REPORT_ACTIVITY_STATUS_LABELS: Record<ReportActivityStatus, string> = {
+  iniciada: "Iniciada",
+  em_andamento: "Em andamento",
+  concluida: "Concluída",
+  paralisada: "Paralisada",
+};
+
+export const OCCURRENCE_TYPE_LABELS: Record<OccurrenceType, string> = {
+  clima: "Clima",
+  atraso: "Atraso",
+  acidente: "Acidente / segurança",
+  visita: "Visita técnica",
+  entrega: "Entrega de material",
+  nao_conformidade: "Não conformidade",
+  paralisacao: "Paralisação",
+  outros: "Outros",
+};

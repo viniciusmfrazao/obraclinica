@@ -49,3 +49,160 @@ body {
   background: var(--safety);
   color: white;
 }
+
+/* ---------------------------------------------------------------------- */
+/* Diário de Obra — folha de impressão (RDO oficial)                      */
+/* ---------------------------------------------------------------------- */
+.rdo-print {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm 12mm;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  aside,
+  nav,
+  .no-print {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  .rdo-print {
+    display: block !important;
+    color: #1b2430;
+    font-family: var(--font-body);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .rdo-head {
+    width: 100%;
+    border: 1.5px solid #1b2430;
+    border-collapse: collapse;
+    margin-bottom: 10px;
+  }
+  .rdo-head td {
+    border: 1px solid #1b2430;
+    padding: 6px 8px;
+    vertical-align: middle;
+  }
+  .rdo-brand {
+    width: 30%;
+    font-size: 11px;
+  }
+  .rdo-title {
+    text-align: center;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.08em;
+  }
+  .rdo-meta {
+    width: 26%;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 10px;
+  }
+
+  .rdo-print h3 {
+    font-family: var(--font-display);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 12px 0 4px;
+    padding-bottom: 2px;
+    border-bottom: 1px solid #1b2430;
+  }
+
+  .rdo-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .rdo-table th,
+  .rdo-table td {
+    border: 1px solid #9aa1a9;
+    padding: 4px 6px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .rdo-table th {
+    background: #eef1f4;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .rdo-table,
+  .rdo-table tr {
+    break-inside: avoid;
+  }
+
+  .rdo-empty {
+    color: #57626f;
+    font-style: italic;
+    margin: 2px 0;
+  }
+  .rdo-text {
+    margin: 2px 0;
+    white-space: pre-wrap;
+  }
+
+  .rdo-photos {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .rdo-photos img {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border: 1px solid #9aa1a9;
+    break-inside: avoid;
+  }
+
+  .rdo-sign {
+    display: flex;
+    gap: 40px;
+    margin-top: 36px;
+    break-inside: avoid;
+  }
+  .rdo-sign > div {
+    flex: 1;
+    text-align: center;
+  }
+  .rdo-sign-line {
+    border-bottom: 1px solid #1b2430;
+    min-height: 28px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    font-family: var(--font-display);
+    font-size: 13px;
+    padding-bottom: 2px;
+  }
+  .rdo-sign p {
+    font-size: 9px;
+    color: #57626f;
+    margin-top: 3px;
+  }
+
+  .rdo-footer {
+    margin-top: 16px;
+    font-family: var(--font-mono);
+    font-size: 8px;
+    color: #57626f;
+    text-align: center;
+  }
+}

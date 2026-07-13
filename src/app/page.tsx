@@ -4,9 +4,9 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Wallet, ListChecks, FileText, Images, ShoppingCart, ArrowRight } from "lucide-react";
+import { Wallet, ListChecks, FileText, Images, ShoppingCart, ArrowRight, BookOpen, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { Activity, Payment, Doc, Photo, ShoppingItem, CATEGORY_LABELS } from "@/lib/types";
+import { Activity, Payment, Doc, Photo, ShoppingItem, DailyReport, CATEGORY_LABELS } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/format";
 import PageHeader from "@/components/PageHeader";
 import StatusBadge from "@/components/StatusBadge";
@@ -17,22 +17,29 @@ export default function DashboardPage() {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [shopping, setShopping] = useState<ShoppingItem[]>([]);
+  const [todayReport, setTodayReport] = useState<DailyReport | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const [a, p, d, f, s] = await Promise.all([
+      const [a, p, d, f, s, r] = await Promise.all([
         supabase.from("activities").select("*").order("date", { ascending: false }),
         supabase.from("payments").select("*").order("date", { ascending: false }),
         supabase.from("documents").select("*").order("date", { ascending: false }),
         supabase.from("photos").select("*").order("date", { ascending: false }),
         supabase.from("shopping_list_items").select("*"),
+        supabase
+          .from("daily_reports")
+          .select("*")
+          .eq("report_date", new Date().toISOString().slice(0, 10))
+          .maybeSingle(),
       ]);
       setActivities(a.data ?? []);
       setPayments(p.data ?? []);
       setDocs(d.data ?? []);
       setPhotos(f.data ?? []);
       setShopping(s.data ?? []);
+      setTodayReport(r.data ?? null);
       setLoading(false);
     }
     load();
@@ -90,6 +97,29 @@ export default function DashboardPage() {
           <p className="text-ink-soft text-sm font-mono">Carregando...</p>
         ) : (
           <>
+            <Link
+              href={todayReport ? `/diario/${todayReport.id}` : "/diario"}
+              className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors min-w-0 ${
+                todayReport?.status === "finalizado"
+                  ? "bg-card border-line hover:bg-paper"
+                  : "bg-blueprint text-white border-blueprint hover:bg-blueprint-dark"
+              }`}
+            >
+              {todayReport?.status === "finalizado" ? (
+                <CheckCircle2 size={18} className="text-success shrink-0" />
+              ) : (
+                <BookOpen size={18} className="shrink-0" />
+              )}
+              <span className="text-sm font-medium flex-1 min-w-0 truncate">
+                {todayReport
+                  ? todayReport.status === "finalizado"
+                    ? `RDO de hoje finalizado (nº ${String(todayReport.report_number).padStart(3, "0")})`
+                    : "RDO de hoje em rascunho — continuar preenchendo"
+                  : "O RDO de hoje ainda não foi aberto — registrar o dia da obra"}
+              </span>
+              <ArrowRight size={16} className="shrink-0" />
+            </Link>
+
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 min-w-0">
               <StatCard
                 icon={<Wallet size={16} />}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
+  BookOpen,
   ListChecks,
   Wallet,
   FileText,
@@ -15,6 +16,7 @@ import { supabase } from "@/lib/supabase";
 
 const NAV = [
   { href: "/", label: "Painel", icon: LayoutDashboard },
+  { href: "/diario", label: "Diário", icon: BookOpen },
   { href: "/atividades", label: "Atividades", icon: ListChecks },
   { href: "/pagamentos", label: "Pagamentos", icon: Wallet },
   { href: "/lista-compras", label: "Compras", icon: ShoppingCart },
@@ -39,7 +41,7 @@ export default function Sidebar() {
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
           {NAV.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href;
+            const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
             return (
               <Link
                 key={href}
@@ -68,7 +70,7 @@ export default function Sidebar() {
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-20 bg-card border-t border-line flex py-2">
         {NAV.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href;
+          const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
             <Link
               key={href}
