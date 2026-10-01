@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/lib/org-context";
 import { Doc, DocumentCategory, DOC_CATEGORY_LABELS, Folder } from "@/lib/types";
 import { formatDate } from "@/lib/format";
+import { uploadToDocuments } from "@/lib/storage";
 import { useActivities } from "@/lib/use-activities";
 import PageHeader from "@/components/PageHeader";
 import Modal from "@/components/Modal";
@@ -27,7 +28,8 @@ export default function DocumentosPage() {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [activityId, setActivityId] = useState("");
   const [folderId, setFolderId] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [savingFolder, setSavingFolder] = useState(false);
@@ -60,7 +62,8 @@ export default function DocumentosPage() {
     setDate(new Date().toISOString().slice(0, 10));
     setActivityId("");
     setFolderId(activeFolder !== "all" ? activeFolder : "");
-    setFile(null);
+    setFiles([]);
+    setUploadErrors([]);
     setOpen(true);
   }
 
@@ -71,7 +74,7 @@ export default function DocumentosPage() {
     setDate(d.date);
     setActivityId(d.activity_id ?? "");
     setFolderId(d.folder_id ?? "");
-    setFile(null);
+    setFiles([]);
     setOpen(true);
   }
 
@@ -91,15 +94,19 @@ export default function DocumentosPage() {
         })
         .eq("id", editingId);
     } else {
-      if (!file) {
+      if (files.length === 0 || !currentOrgId) {
         setSaving(false);
         return;
       }
-      const path = `${currentOrgId}/${Date.now()}-${file.name}`;
-      const { error } = await supabase.storage.from("documents").upload(path, file);
-      if (!error) {
-        await supabase.from("documents").insert({
-          name: name || file.name,
+      const errors: string[] = [];
+      for (const file of files) {
+        const { path, error } = await uploadToDocuments(file, currentOrgId);
+        if (!path) {
+          errors.push(error ?? `Falha ao enviar "${file.name}".`);
+          continue;
+        }
+        const { error: insertError } = await supabase.from("documents").insert({
+          name: files.length === 1 && name.trim() ? name.trim() : file.name,
           category,
           date,
           activity_id: activityId || null,
@@ -107,13 +114,26 @@ export default function DocumentosPage() {
           file_path: path,
           organization_id: currentOrgId,
         });
+        if (insertError) {
+          await supabase.storage.from("documents").remove([path]);
+          errors.push(`Não foi possível registrar "${file.name}".`);
+        }
+      }
+      if (errors.length > 0) {
+        // mantém o formulário aberto, mostrando só o que falhou
+        setUploadErrors(errors);
+        setFiles(files.filter((f) => errors.some((m) => m.includes(`"${f.name}"`))));
+        setSaving(false);
+        load();
+        return;
       }
     }
 
     setSaving(false);
     setOpen(false);
     setName("");
-    setFile(null);
+    setFiles([]);
+    setUploadErrors([]);
     setActivityId("");
     load();
   }
@@ -282,20 +302,43 @@ export default function DocumentosPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           {!editingId && (
             <div>
-              <label className="block text-sm text-ink-soft mb-1">Arquivo</label>
+              <label className="block text-sm text-ink-soft mb-1">
+                Arquivos (PDF, imagens, planilhas…)
+              </label>
               <input
-                required
+                required={files.length === 0}
                 type="file"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                multiple
+                onChange={(e) => {
+                  setFiles(Array.from(e.target.files ?? []));
+                  setUploadErrors([]);
+                }}
                 className="w-full text-sm text-ink-soft"
               />
+              {files.length > 1 && (
+                <p className="text-[11px] text-ink-soft mt-1">
+                  {files.length} arquivos selecionados — cada um será salvo com o próprio nome.
+                </p>
+              )}
+              {uploadErrors.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {uploadErrors.map((m) => (
+                    <li key={m} className="text-[11px] text-safety">
+                      {m}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
           <div>
-            <label className="block text-sm text-ink-soft mb-1">Nome</label>
+            <label className="block text-sm text-ink-soft mb-1">
+              Nome{!editingId && files.length > 1 ? " (usado só quando é um arquivo)" : ""}
+            </label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
+              disabled={!editingId && files.length > 1}
               placeholder="Ex: Contrato empreiteiro"
               className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blueprint"
             />

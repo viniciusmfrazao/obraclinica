@@ -5,12 +5,13 @@ export const dynamic = "force-dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus, Trash2, Trophy, CheckCircle2, X, Receipt } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Trophy, CheckCircle2, X, Receipt, Paperclip, FileText } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/lib/org-context";
 import {
   Account,
   Quotation,
+  QuotationAttachment,
   QuotationItem,
   QuotationPrice,
   QuotationSupplier,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/types";
 import { cheapestSupplierId, parseMoney, supplierTotals } from "@/lib/quotations";
 import { formatCurrency } from "@/lib/format";
+import { openDocument, uploadToDocuments } from "@/lib/storage";
 import PageHeader from "@/components/PageHeader";
 import Modal from "@/components/Modal";
 
@@ -45,6 +47,10 @@ export default function OrcamentoDetalhePage() {
   const [suppliers, setSuppliers] = useState<QuotationSupplier[]>([]);
   const [prices, setPrices] = useState<QuotationPrice[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [attachments, setAttachments] = useState<QuotationAttachment[]>([]);
+  const [attachTarget, setAttachTarget] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const [supplierSuggestions, setSupplierSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -62,7 +68,7 @@ export default function OrcamentoDetalhePage() {
 
   const load = useCallback(async () => {
     if (!currentOrgId || !id) return;
-    const [q, i, s, p, a, pay, inst] = await Promise.all([
+    const [q, i, s, p, a, pay, inst, att] = await Promise.all([
       supabase.from("quotations").select("*").eq("id", id).eq("organization_id", currentOrgId).maybeSingle(),
       supabase.from("quotation_items").select("*").eq("quotation_id", id).order("position").order("created_at"),
       supabase.from("quotation_suppliers").select("*").eq("quotation_id", id).order("position").order("created_at"),
@@ -70,6 +76,7 @@ export default function OrcamentoDetalhePage() {
       supabase.from("accounts").select("*").eq("organization_id", currentOrgId).eq("active", true).order("name"),
       supabase.from("payments").select("supplier").eq("organization_id", currentOrgId),
       supabase.from("installments").select("supplier").eq("organization_id", currentOrgId),
+      supabase.from("quotation_attachments").select("*").eq("quotation_id", id).order("created_at"),
     ]);
     if (!q.data) {
       setNotFound(true);
@@ -81,6 +88,7 @@ export default function OrcamentoDetalhePage() {
     setSuppliers(s.data ?? []);
     setPrices(p.data ?? []);
     setAccounts(a.data ?? []);
+    setAttachments(att.data ?? []);
 
     const seen = new Map<string, string>();
     [...(s.data ?? []).map((x) => x.name), ...(pay.data ?? []).map((x) => x.supplier), ...(inst.data ?? []).map((x) => x.supplier)]
@@ -178,6 +186,7 @@ export default function OrcamentoDetalhePage() {
     await supabase.from("quotation_suppliers").delete().eq("id", s.id);
     setSuppliers((prev) => prev.filter((x) => x.id !== s.id));
     setPrices((prev) => prev.filter((p) => p.supplier_id !== s.id));
+    setAttachments((prev) => prev.map((a) => (a.supplier_id === s.id ? { ...a, supplier_id: null } : a)));
     if (quotation?.chosen_supplier_id === s.id) {
       setQuotation({ ...quotation, chosen_supplier_id: null, status: "aberto" });
     }
@@ -217,6 +226,49 @@ export default function OrcamentoDetalhePage() {
     setPrices((prev) => [...prev.filter((p) => !(p.supplier_id === s.id && p.item_id === item.id)), data]);
   }
 
+  // ---------------- anexos ----------------
+  async function uploadAttachments(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0 || !quotation || !currentOrgId) return;
+    setUploading(true);
+    setUploadErrors([]);
+    const errors: string[] = [];
+    const added: QuotationAttachment[] = [];
+    for (const file of Array.from(fileList)) {
+      const { path, error: upErr } = await uploadToDocuments(file, currentOrgId, "orcamentos");
+      if (!path) {
+        errors.push(upErr ?? `Falha ao enviar "${file.name}".`);
+        continue;
+      }
+      const { data, error: insErr } = await supabase
+        .from("quotation_attachments")
+        .insert({
+          organization_id: currentOrgId,
+          quotation_id: quotation.id,
+          supplier_id: attachTarget || null,
+          name: file.name,
+          file_path: path,
+        })
+        .select()
+        .single();
+      if (insErr || !data) {
+        await supabase.storage.from("documents").remove([path]);
+        errors.push(`Não foi possível registrar "${file.name}".`);
+        continue;
+      }
+      added.push(data);
+    }
+    setAttachments((prev) => [...prev, ...added]);
+    setUploadErrors(errors);
+    setUploading(false);
+  }
+
+  async function removeAttachment(att: QuotationAttachment) {
+    if (!confirm(`Remover o arquivo "${att.name}"?`)) return;
+    await supabase.storage.from("documents").remove([att.file_path]);
+    await supabase.from("quotation_attachments").delete().eq("id", att.id);
+    setAttachments((prev) => prev.filter((a) => a.id !== att.id));
+  }
+
   // ---------------- decisão ----------------
   async function setStatus(patch: Partial<Quotation>) {
     if (!quotation) return;
@@ -232,7 +284,10 @@ export default function OrcamentoDetalhePage() {
 
   async function deleteQuotation() {
     if (!quotation) return;
-    if (!confirm("Excluir este orçamento e todos os preços dele?")) return;
+    if (!confirm("Excluir este orçamento, os preços e os arquivos anexados?")) return;
+    if (attachments.length > 0) {
+      await supabase.storage.from("documents").remove(attachments.map((a) => a.file_path));
+    }
     await supabase.from("quotations").delete().eq("id", quotation.id);
     router.push("/orcamentos");
   }
@@ -670,6 +725,98 @@ export default function OrcamentoDetalhePage() {
             </table>
           </div>
         )}
+
+        {/* Anexos */}
+        <div className="max-w-3xl">
+          <h2 className="font-display font-semibold text-ink flex items-center gap-2 mb-2">
+            <Paperclip size={16} /> Anexos
+            {attachments.length > 0 && (
+              <span className="text-xs font-mono text-ink-soft">({attachments.length})</span>
+            )}
+          </h2>
+          <p className="text-xs text-ink-soft mb-3">
+            Propostas, PDFs, fotos e planilhas. Escolha de qual fornecedor é o arquivo, ou deixe como
+            geral.
+          </p>
+
+          <div className="flex flex-wrap gap-2 mb-3">
+            <select
+              value={attachTarget}
+              onChange={(e) => setAttachTarget(e.target.value)}
+              className="rounded-md border border-line bg-white px-3 py-2 text-sm"
+            >
+              <option value="">Geral (do orçamento)</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  Proposta de {s.name}
+                </option>
+              ))}
+            </select>
+            <label
+              className={`flex items-center gap-2 bg-blueprint hover:bg-blueprint-dark text-white text-sm font-medium px-4 py-2 rounded-md transition-colors cursor-pointer ${
+                uploading ? "opacity-60 pointer-events-none" : ""
+              }`}
+            >
+              <Plus size={15} /> {uploading ? "Enviando…" : "Anexar arquivos"}
+              <input
+                type="file"
+                multiple
+                className="hidden"
+                disabled={uploading}
+                onChange={(e) => {
+                  uploadAttachments(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+
+          {uploadErrors.length > 0 && (
+            <ul className="mb-3 space-y-1">
+              {uploadErrors.map((m) => (
+                <li key={m} className="text-xs text-safety">
+                  {m}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {attachments.length === 0 ? (
+            <p className="text-sm text-ink-soft">Nenhum arquivo anexado ainda.</p>
+          ) : (
+            <div className="space-y-2">
+              {attachments.map((att) => {
+                const owner = suppliers.find((s) => s.id === att.supplier_id);
+                return (
+                  <div
+                    key={att.id}
+                    className="flex items-center gap-3 bg-card border border-line rounded-md px-3 py-2 min-w-0"
+                  >
+                    <FileText size={16} className="text-blueprint shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <button
+                        onClick={() => openDocument(att.file_path)}
+                        className="text-sm text-ink hover:text-blueprint hover:underline truncate block max-w-full text-left"
+                      >
+                        {att.name}
+                      </button>
+                      <p className="text-[11px] text-ink-soft">
+                        {owner ? `Proposta de ${owner.name}` : "Geral"}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => removeAttachment(att)}
+                      className="text-ink-soft hover:text-safety shrink-0"
+                      aria-label={`Remover ${att.name}`}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Adicionar item */}
         {!locked && (

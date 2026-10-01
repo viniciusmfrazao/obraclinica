@@ -317,3 +317,13 @@ export interface QuotationPrice {
   item_id: string;
   unit_price: number;
 }
+
+export interface QuotationAttachment {
+  id: string;
+  organization_id: string;
+  quotation_id: string;
+  supplier_id: string | null;
+  name: string;
+  file_path: string;
+  created_at: string;
+}

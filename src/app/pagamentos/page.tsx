@@ -9,6 +9,7 @@ import { useOrg } from "@/lib/org-context";
 import { Payment, PaymentCategory, CATEGORY_LABELS, Budget, Installment, Account } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useActivities } from "@/lib/use-activities";
+import { uploadToDocuments } from "@/lib/storage";
 import PageHeader from "@/components/PageHeader";
 import Modal from "@/components/Modal";
 
@@ -147,9 +148,9 @@ export default function PagamentosPage() {
 
   async function uploadIfPresent(file: File | null) {
     if (!file || !currentOrgId) return null;
-    const path = `${currentOrgId}/${Date.now()}-${file.name}`;
-    const { error } = await supabase.storage.from("documents").upload(path, file);
-    return error ? null : path;
+    const { path, error } = await uploadToDocuments(file, currentOrgId);
+    if (!path) alert(error ?? "Não foi possível enviar o arquivo.");
+    return path;
   }
 
   function openNew() {
