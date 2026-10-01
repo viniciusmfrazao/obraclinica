@@ -18,8 +18,17 @@ import {
   QUOTATION_STATUS_LABELS,
   CATEGORY_LABELS,
 } from "@/lib/types";
-import { cheapestSupplierId, parseMoney, supplierTotals } from "@/lib/quotations";
-import { formatCurrency } from "@/lib/format";
+import {
+  addMonthsISO,
+  cheapestSupplierId,
+  lineTotal,
+  parseMoney,
+  PAYMENT_METHODS,
+  round2,
+  splitInstallments,
+  supplierTotals,
+} from "@/lib/quotations";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { openDocument, uploadToDocuments } from "@/lib/storage";
 import PageHeader from "@/components/PageHeader";
 import Modal from "@/components/Modal";
@@ -29,6 +38,12 @@ const SUGGESTED_SUPPLIERS = 3;
 function moneyToInput(v: number | null | undefined) {
   return v === null || v === undefined ? "" : String(v).replace(".", ",");
 }
+
+function moneyField(v: number) {
+  return v.toFixed(2).replace(".", ",");
+}
+
+const ADJUSTED_INPUT = "border-safety/60 bg-safety/5";
 
 function blurOnEnter(e: React.KeyboardEvent<HTMLInputElement>) {
   if (e.key === "Enter") {
@@ -64,6 +79,7 @@ export default function OrcamentoDetalhePage() {
   const [payOpen, setPayOpen] = useState(false);
   const [dueDate, setDueDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [payAccountId, setPayAccountId] = useState("");
+  const [payCount, setPayCount] = useState("1");
   const [creatingPayment, setCreatingPayment] = useState(false);
 
   const load = useCallback(async () => {
@@ -205,7 +221,7 @@ export default function OrcamentoDetalhePage() {
       }
       return;
     }
-    if (existing && Number(existing.unit_price) === value) return;
+    if (existing && Number(existing.unit_price) === value && existing.line_total_override == null) return;
 
     const { data, error: err } = await supabase
       .from("quotation_prices")
@@ -216,6 +232,7 @@ export default function OrcamentoDetalhePage() {
           supplier_id: s.id,
           item_id: item.id,
           unit_price: value,
+          line_total_override: null,
         },
         { onConflict: "supplier_id,item_id" }
       )
@@ -224,6 +241,77 @@ export default function OrcamentoDetalhePage() {
     if (err || !data) return setError("Não foi possível salvar o preço.");
     setError(null);
     setPrices((prev) => [...prev.filter((p) => !(p.supplier_id === s.id && p.item_id === item.id)), data]);
+  }
+
+  // Total da linha editável: grava o valor digitado e mantém o unitário coerente
+  async function saveLineTotal(s: QuotationSupplier, item: QuotationItem, raw: string) {
+    if (!quotation || !currentOrgId) return;
+    const existing = prices.find((p) => p.supplier_id === s.id && p.item_id === item.id);
+    const value = parseMoney(raw);
+    const qty = Number(item.quantity);
+
+    if (value === null) {
+      // campo limpo: volta ao cálculo automático
+      if (existing && existing.line_total_override != null) {
+        const { error: err } = await supabase
+          .from("quotation_prices")
+          .update({ line_total_override: null })
+          .eq("id", existing.id);
+        if (err) return setError("Não foi possível salvar o total da linha.");
+        setPrices((prev) => prev.map((p) => (p.id === existing.id ? { ...p, line_total_override: null } : p)));
+      }
+      return;
+    }
+
+    const computed = existing ? round2(Number(existing.unit_price) * qty) : null;
+    const override = computed !== null && value === computed ? null : value;
+    if (existing && Number(existing.line_total_override ?? -1) === (override ?? -1)) return;
+
+    const unitPrice = existing
+      ? Number(existing.unit_price)
+      : Math.round((qty > 0 ? value / qty : value) * 1e6) / 1e6;
+
+    const { data, error: err } = await supabase
+      .from("quotation_prices")
+      .upsert(
+        {
+          organization_id: currentOrgId,
+          quotation_id: quotation.id,
+          supplier_id: s.id,
+          item_id: item.id,
+          unit_price: unitPrice,
+          line_total_override: override,
+        },
+        { onConflict: "supplier_id,item_id" }
+      )
+      .select()
+      .single();
+    if (err || !data) return setError("Não foi possível salvar o total da linha.");
+    setError(null);
+    setPrices((prev) => [...prev.filter((p) => !(p.supplier_id === s.id && p.item_id === item.id)), data]);
+  }
+
+  // Subtotal / total editáveis: igual ao calculado = volta ao automático
+  function saveSubtotal(s: QuotationSupplier, raw: string) {
+    const t = supplierTotals(items, prices, s);
+    const v = parseMoney(raw);
+    const next = v === null || v === t.computedSubtotal ? null : v;
+    if ((s.subtotal_override ?? null) === next) return;
+    updateSupplier(s, { subtotal_override: next });
+  }
+
+  function saveTotal(s: QuotationSupplier, raw: string) {
+    const t = supplierTotals(items, prices, s);
+    const v = parseMoney(raw);
+    const next = v === null || v === t.computedTotal ? null : v;
+    if ((s.total_override ?? null) === next) return;
+    updateSupplier(s, { total_override: next });
+  }
+
+  function saveDiscountAmount(s: QuotationSupplier, raw: string) {
+    // digitar o valor em R$ troca o desconto para "R$"
+    const v = parseMoney(raw) ?? 0;
+    updateSupplier(s, { discount_type: "valor", discount_value: v });
   }
 
   // ---------------- anexos ----------------
@@ -298,25 +386,30 @@ export default function OrcamentoDetalhePage() {
     const chosen = suppliers.find((s) => s.id === quotation.chosen_supplier_id);
     if (!chosen) return;
     const totals = supplierTotals(items, prices, chosen);
+    const count = Math.min(36, Math.max(1, parseInt(payCount, 10) || 1));
+    const amounts = splitInstallments(totals.total, count);
+    const method = chosen.payment_method ? ` · ${chosen.payment_method}` : "";
     setCreatingPayment(true);
-    const { data, error: err } = await supabase
+    const { data: created, error: err } = await supabase
       .from("installments")
-      .insert({
-        description: `${quotation.title} — ${chosen.name}`,
-        amount: totals.total,
-        category: quotation.category,
-        supplier: chosen.name,
-        account_id: payAccountId || null,
-        due_date: dueDate,
-        activity_id: quotation.activity_id,
-        organization_id: currentOrgId,
-      })
-      .select()
-      .single();
-    if (err || !data) {
+      .insert(
+        amounts.map((amount, idx) => ({
+          description: `${quotation.title} — ${chosen.name}${count > 1 ? ` (${idx + 1}/${count})` : ""}${method}`,
+          amount,
+          category: quotation.category,
+          supplier: chosen.name,
+          account_id: payAccountId || null,
+          due_date: addMonthsISO(dueDate, idx),
+          activity_id: quotation.activity_id,
+          organization_id: currentOrgId,
+        }))
+      )
+      .select();
+    if (err || !created || created.length === 0) {
       setCreatingPayment(false);
-      return setError("Não foi possível gerar a conta a pagar.");
+      return setError("Não foi possível gerar as contas a pagar.");
     }
+    const data = [...created].sort((x, y) => x.due_date.localeCompare(y.due_date))[0];
     await setStatus({ installment_id: data.id });
     setCreatingPayment(false);
     setPayOpen(false);
@@ -378,9 +471,20 @@ export default function OrcamentoDetalhePage() {
           <ArrowLeft size={15} /> Orçamentos
         </Link>
 
-        {quotation.notes && (
-          <p className="text-sm text-ink-soft max-w-3xl whitespace-pre-line">{quotation.notes}</p>
-        )}
+        <div className="max-w-3xl">
+          <label className="block text-sm text-ink-soft mb-1">Observações do orçamento</label>
+          <textarea
+            key={`qn-${quotation.notes ?? ""}`}
+            defaultValue={quotation.notes ?? ""}
+            rows={2}
+            onBlur={(e) => {
+              const v = e.target.value.trim() || null;
+              if (v !== (quotation.notes ?? null)) setStatus({ notes: v });
+            }}
+            placeholder="Ex: entrega na obra, retirar com nota fiscal, validade da proposta…"
+            className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blueprint"
+          />
+        </div>
 
         {error && (
           <div className="bg-safety/10 border border-safety/40 text-safety text-sm rounded-md px-4 py-2.5 max-w-3xl">
@@ -410,6 +514,7 @@ export default function OrcamentoDetalhePage() {
               <button
                 onClick={() => {
                   setPayAccountId("");
+                  setPayCount(String(chosen.installments_count || 1));
                   setPayOpen(true);
                 }}
                 disabled={chosenTotals.total <= 0}
@@ -569,18 +674,33 @@ export default function OrcamentoDetalhePage() {
                               defaultValue={moneyToInput(price ? Number(price.unit_price) : null)}
                               disabled={locked}
                               inputMode="decimal"
-                              placeholder="R$ 0,00"
+                              placeholder="Valor unit. R$"
                               onKeyDown={blurOnEnter}
                               onBlur={(e) => savePrice(s, item, e.target.value)}
                               className={`w-full rounded-md border px-2 py-1.5 text-sm font-mono text-right ${
                                 isMin ? "border-success/60 bg-success/10" : "border-line bg-white"
                               }`}
                             />
-                            {price && (
-                              <p className="text-[11px] text-ink-soft font-mono text-right mt-0.5">
-                                = {formatCurrency(Number(price.unit_price) * Number(item.quantity))}
-                              </p>
-                            )}
+                            <div className="flex items-center justify-end gap-1 mt-1">
+                              <span className="text-[11px] text-ink-soft">total</span>
+                              <input
+                                key={`lt-${s.id}-${item.id}-${price?.unit_price ?? ""}-${price?.line_total_override ?? ""}-${item.quantity}`}
+                                defaultValue={price ? moneyField(lineTotal(item, price) ?? 0) : ""}
+                                disabled={locked}
+                                inputMode="decimal"
+                                placeholder="R$ 0,00"
+                                title={
+                                  price?.line_total_override != null
+                                    ? "Total ajustado à mão. Apague o campo para voltar ao cálculo automático."
+                                    : "Calculado: valor unitário × quantidade. Você pode editar."
+                                }
+                                onKeyDown={blurOnEnter}
+                                onBlur={(e) => saveLineTotal(s, item, e.target.value)}
+                                className={`w-28 rounded border px-1.5 py-0.5 text-xs font-mono text-right ${
+                                  price?.line_total_override != null ? ADJUSTED_INPUT : "border-line bg-white/70"
+                                }`}
+                              />
+                            </div>
                           </td>
                         );
                       })}
@@ -607,12 +727,90 @@ export default function OrcamentoDetalhePage() {
                   {suppliers.map((s) => {
                     const t = supplierTotals(items, prices, s);
                     return (
-                      <td key={s.id} className="px-3 py-2 text-right font-mono text-sm">
-                        {formatCurrency(t.subtotal)}
+                      <td key={s.id} className="px-3 py-2">
+                        <input
+                          key={`st-${s.id}-${t.subtotal}-${s.subtotal_override ?? ""}`}
+                          defaultValue={moneyField(t.subtotal)}
+                          disabled={locked}
+                          inputMode="decimal"
+                          onKeyDown={blurOnEnter}
+                          onBlur={(e) => saveSubtotal(s, e.target.value)}
+                          title="Soma das linhas. Você pode editar; apague o campo para voltar ao cálculo."
+                          className={`w-full rounded-md border px-2 py-1.5 text-sm font-mono text-right ${
+                            t.subtotalAdjusted ? ADJUSTED_INPUT : "border-line bg-white"
+                          }`}
+                        />
+                        {t.subtotalAdjusted && !locked && (
+                          <button
+                            type="button"
+                            onClick={() => updateSupplier(s, { subtotal_override: null })}
+                            className="block ml-auto text-[11px] text-safety hover:underline mt-0.5"
+                          >
+                            ajustado · voltar para {formatCurrency(t.computedSubtotal)}
+                          </button>
+                        )}
                         {!t.complete && (
-                          <p className="text-[11px] text-safety font-sans">
+                          <p className="text-[11px] text-safety text-right mt-0.5">
                             {t.pricedItems}/{items.length} itens cotados
                           </p>
+                        )}
+                      </td>
+                    );
+                  })}
+                  <td />
+                </tr>
+                <tr className="border-b border-line/60">
+                  <td colSpan={3} className="px-3 py-2 text-xs uppercase tracking-wide text-ink-soft align-top">
+                    Desconto
+                  </td>
+                  {suppliers.map((s) => {
+                    const t = supplierTotals(items, prices, s);
+                    return (
+                      <td key={s.id} className="px-3 py-2 align-top">
+                        <div className="flex gap-1">
+                          <select
+                            value={s.discount_type}
+                            disabled={locked}
+                            onChange={(e) =>
+                              updateSupplier(s, { discount_type: e.target.value as "valor" | "percentual" })
+                            }
+                            className="w-16 shrink-0 rounded-md border border-line bg-white px-1 py-1.5 text-sm"
+                          >
+                            <option value="valor">R$</option>
+                            <option value="percentual">%</option>
+                          </select>
+                          <input
+                            key={`dv-${s.id}-${s.discount_type}-${s.discount_value}`}
+                            defaultValue={Number(s.discount_value) ? moneyToInput(Number(s.discount_value)) : ""}
+                            disabled={locked}
+                            inputMode="decimal"
+                            placeholder={s.discount_type === "percentual" ? "0 %" : "R$ 0,00"}
+                            onKeyDown={blurOnEnter}
+                            onBlur={(e) => {
+                              const v = parseMoney(e.target.value) ?? 0;
+                              if (v !== Number(s.discount_value)) updateSupplier(s, { discount_value: v });
+                            }}
+                            className="w-full min-w-0 rounded-md border border-line bg-white px-2 py-1.5 text-sm font-mono text-right"
+                          />
+                        </div>
+                        {s.discount_type === "percentual" && (
+                          <div className="flex items-center justify-end gap-1 mt-1">
+                            <span className="text-[11px] text-ink-soft">− R$</span>
+                            <input
+                              key={`da-${s.id}-${t.discountAmount}`}
+                              defaultValue={t.discountAmount ? moneyField(t.discountAmount) : ""}
+                              disabled={locked}
+                              inputMode="decimal"
+                              placeholder="0,00"
+                              title="Valor do desconto em R$. Editar aqui troca o desconto para valor fixo."
+                              onKeyDown={blurOnEnter}
+                              onBlur={(e) => {
+                                const v = parseMoney(e.target.value) ?? 0;
+                                if (v !== t.discountAmount) saveDiscountAmount(s, e.target.value);
+                              }}
+                              className="w-24 rounded border border-line bg-white/70 px-1.5 py-0.5 text-xs font-mono text-right"
+                            />
+                          </div>
                         )}
                       </td>
                     );
@@ -649,16 +847,114 @@ export default function OrcamentoDetalhePage() {
                   {suppliers.map((s) => {
                     const t = supplierTotals(items, prices, s);
                     return (
-                      <td
-                        key={s.id}
-                        className={`px-3 py-3 text-right font-mono font-semibold ${
-                          cheapestId === s.id ? "text-success" : "text-ink"
-                        }`}
-                      >
-                        {formatCurrency(t.total)}
+                      <td key={s.id} className="px-3 py-3">
+                        <input
+                          key={`tt-${s.id}-${t.total}-${s.total_override ?? ""}`}
+                          defaultValue={moneyField(t.total)}
+                          disabled={locked}
+                          inputMode="decimal"
+                          onKeyDown={blurOnEnter}
+                          onBlur={(e) => saveTotal(s, e.target.value)}
+                          title="Subtotal − desconto + frete. Você pode editar; apague o campo para voltar ao cálculo."
+                          className={`w-full rounded-md border px-2 py-1.5 text-sm font-mono font-semibold text-right ${
+                            t.totalAdjusted
+                              ? ADJUSTED_INPUT
+                              : cheapestId === s.id
+                                ? "border-success/60 bg-success/10 text-success"
+                                : "border-line bg-white text-ink"
+                          }`}
+                        />
+                        {t.totalAdjusted && !locked && (
+                          <button
+                            type="button"
+                            onClick={() => updateSupplier(s, { total_override: null })}
+                            className="block ml-auto text-[11px] text-safety hover:underline mt-0.5"
+                          >
+                            ajustado · voltar para {formatCurrency(t.computedTotal)}
+                          </button>
+                        )}
                       </td>
                     );
                   })}
+                  <td />
+                </tr>
+                <tr className="border-b border-line/60">
+                  <td colSpan={3} className="px-3 py-2 text-xs uppercase tracking-wide text-ink-soft">
+                    Forma de pagamento
+                  </td>
+                  {suppliers.map((s) => (
+                    <td key={s.id} className="px-3 py-2">
+                      <select
+                        value={s.payment_method ?? ""}
+                        disabled={locked}
+                        onChange={(e) => updateSupplier(s, { payment_method: e.target.value || null })}
+                        className="w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm"
+                      >
+                        <option value="">Selecione…</option>
+                        {PAYMENT_METHODS.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  ))}
+                  <td />
+                </tr>
+                <tr className="border-b border-line/60">
+                  <td colSpan={3} className="px-3 py-2 text-xs uppercase tracking-wide text-ink-soft">
+                    Parcelas
+                  </td>
+                  {suppliers.map((s) => {
+                    const t = supplierTotals(items, prices, s);
+                    const n = Number(s.installments_count) || 1;
+                    return (
+                      <td key={s.id} className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            key={`ic-${s.id}-${s.installments_count}`}
+                            type="number"
+                            min={1}
+                            max={36}
+                            defaultValue={s.installments_count}
+                            disabled={locked}
+                            onKeyDown={blurOnEnter}
+                            onBlur={(e) => {
+                              const v = Math.min(36, Math.max(1, parseInt(e.target.value, 10) || 1));
+                              if (v !== Number(s.installments_count)) updateSupplier(s, { installments_count: v });
+                              else e.target.value = String(v);
+                            }}
+                            className="w-16 rounded-md border border-line bg-white px-2 py-1.5 text-sm font-mono text-right"
+                          />
+                          <span className="text-xs text-ink-soft font-mono">
+                            {n > 1 ? `× ${formatCurrency(splitInstallments(t.total, n)[1] ?? t.total)}` : "à vista"}
+                          </span>
+                        </div>
+                      </td>
+                    );
+                  })}
+                  <td />
+                </tr>
+                <tr className="border-b border-line/60">
+                  <td colSpan={3} className="px-3 py-2 text-xs uppercase tracking-wide text-ink-soft">
+                    Condições
+                  </td>
+                  {suppliers.map((s) => (
+                    <td key={s.id} className="px-3 py-2">
+                      <input
+                        key={`pt-${s.id}-${s.payment_terms ?? ""}`}
+                        defaultValue={s.payment_terms ?? ""}
+                        disabled={locked}
+                        placeholder="Ex: 30/60/90 dias, entrada + 2x"
+                        onKeyDown={blurOnEnter}
+                        onBlur={(e) => {
+                          const v = e.target.value.trim() || null;
+                          if (v !== s.payment_terms) updateSupplier(s, { payment_terms: v });
+                        }}
+                        className="w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm"
+                      />
+                    </td>
+                  ))}
                   <td />
                 </tr>
                 <tr className="border-b border-line/60">
@@ -684,20 +980,20 @@ export default function OrcamentoDetalhePage() {
                   <td />
                 </tr>
                 <tr className="border-b border-line/60">
-                  <td colSpan={3} className="px-3 py-2 text-xs uppercase tracking-wide text-ink-soft">
-                    Pagamento
+                  <td colSpan={3} className="px-3 py-2 text-xs uppercase tracking-wide text-ink-soft align-top">
+                    Observações
                   </td>
                   {suppliers.map((s) => (
                     <td key={s.id} className="px-3 py-2">
-                      <input
-                        key={`pt-${s.id}-${s.payment_terms ?? ""}`}
-                        defaultValue={s.payment_terms ?? ""}
+                      <textarea
+                        key={`sn-${s.id}-${s.notes ?? ""}`}
+                        defaultValue={s.notes ?? ""}
                         disabled={locked}
-                        placeholder="Ex: 30 dias, à vista"
-                        onKeyDown={blurOnEnter}
+                        rows={2}
+                        placeholder="Ex: preço válido até sexta, retirada no depósito"
                         onBlur={(e) => {
                           const v = e.target.value.trim() || null;
-                          if (v !== s.payment_terms) updateSupplier(s, { payment_terms: v });
+                          if (v !== (s.notes ?? null)) updateSupplier(s, { notes: v });
                         }}
                         className="w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm"
                       />
@@ -854,7 +1150,7 @@ export default function OrcamentoDetalhePage() {
         )}
       </div>
 
-      <Modal open={payOpen} onClose={() => setPayOpen(false)} title="Gerar conta a pagar">
+      <Modal open={payOpen} onClose={() => setPayOpen(false)} title="Gerar contas a pagar">
         <form onSubmit={createInstallment} className="space-y-4">
           {chosen && chosenTotals && (
             <div className="rounded-md border border-line bg-paper/60 px-3 py-2.5 text-sm">
@@ -863,11 +1159,28 @@ export default function OrcamentoDetalhePage() {
               </p>
               <p className="font-mono text-ink-soft text-xs mt-0.5">
                 {formatCurrency(chosenTotals.total)} · {CATEGORY_LABELS[quotation.category]}
+                {chosen.payment_method ? ` · ${chosen.payment_method}` : ""}
               </p>
+              {chosen.payment_terms && (
+                <p className="text-xs text-ink-soft mt-0.5">Condições: {chosen.payment_terms}</p>
+              )}
             </div>
           )}
           <div>
-            <label className="block text-sm text-ink-soft mb-1">Vencimento</label>
+            <label className="block text-sm text-ink-soft mb-1">Número de parcelas</label>
+            <input
+              type="number"
+              min={1}
+              max={36}
+              value={payCount}
+              onChange={(e) => setPayCount(e.target.value)}
+              className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-ink-soft mb-1">
+              {Number(payCount) > 1 ? "Vencimento da 1ª parcela" : "Vencimento"}
+            </label>
             <input
               type="date"
               required
@@ -891,12 +1204,26 @@ export default function OrcamentoDetalhePage() {
               ))}
             </select>
           </div>
+          {chosenTotals && Number(payCount) > 1 && dueDate && (
+            <div className="rounded-md border border-line bg-paper/60 px-3 py-2 text-xs font-mono space-y-0.5">
+              {splitInstallments(chosenTotals.total, Math.min(36, Math.max(1, parseInt(payCount, 10) || 1))).map(
+                (amount, idx) => (
+                  <div key={idx} className="flex justify-between">
+                    <span className="text-ink-soft">
+                      {idx + 1}ª · {formatDate(addMonthsISO(dueDate, idx))}
+                    </span>
+                    <span className="text-ink">{formatCurrency(amount)}</span>
+                  </div>
+                )
+              )}
+            </div>
+          )}
           <button
             type="submit"
             disabled={creatingPayment}
             className="w-full bg-blueprint hover:bg-blueprint-dark text-white font-medium py-2.5 rounded-md transition-colors disabled:opacity-60"
           >
-            {creatingPayment ? "Gerando…" : "Gerar conta a pagar"}
+            {creatingPayment ? "Gerando…" : Number(payCount) > 1 ? "Gerar contas a pagar" : "Gerar conta a pagar"}
           </button>
         </form>
       </Modal>

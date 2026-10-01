@@ -307,6 +307,12 @@ export interface QuotationSupplier {
   delivery_time: string | null;
   notes: string | null;
   position: number;
+  discount_type: "valor" | "percentual";
+  discount_value: number;
+  subtotal_override: number | null;
+  total_override: number | null;
+  payment_method: string | null;
+  installments_count: number;
 }
 
 export interface QuotationPrice {
@@ -316,6 +322,7 @@ export interface QuotationPrice {
   supplier_id: string;
   item_id: string;
   unit_price: number;
+  line_total_override: number | null;
 }
 
 export interface QuotationAttachment {
