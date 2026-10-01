@@ -27,6 +27,7 @@ export interface Payment {
   category: PaymentCategory;
   supplier: string | null;
   account: string | null;
+  account_id: string | null;
   date: string;
   receipt_path: string | null;
   invoice_path: string | null;
@@ -69,6 +70,14 @@ export interface Budget {
   created_at: string;
 }
 
+export interface Account {
+  id: string;
+  organization_id: string;
+  name: string;
+  active: boolean;
+  created_at: string;
+}
+
 export type InstallmentStatus = "pendente" | "pago";
 
 export interface Installment {
@@ -79,6 +88,7 @@ export interface Installment {
   category: PaymentCategory;
   supplier: string | null;
   account: string | null;
+  account_id: string | null;
   due_date: string;
   activity_id: string | null;
   status: InstallmentStatus;

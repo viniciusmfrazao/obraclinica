@@ -3,22 +3,26 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { Plus, Paperclip, Receipt, Pencil, Target, CalendarClock, Check, Trash2 } from "lucide-react";
+import { Plus, Paperclip, Receipt, Pencil, Target, CalendarClock, Check, Trash2, Landmark } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/lib/org-context";
-import { Payment, PaymentCategory, CATEGORY_LABELS, Budget, Installment } from "@/lib/types";
+import { Payment, PaymentCategory, CATEGORY_LABELS, Budget, Installment, Account } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useActivities } from "@/lib/use-activities";
 import PageHeader from "@/components/PageHeader";
 import Modal from "@/components/Modal";
 
-const ACCOUNT_SUGGESTIONS = ["Conta corrente", "Cartão de crédito", "Pix", "Dinheiro"];
+const NEW_ACCOUNT = "__new__";
 
 export default function PagamentosPage() {
   const { currentOrgId } = useOrg();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [installments, setInstallments] = useState<Installment[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountsOpen, setAccountsOpen] = useState(false);
+  const [newAccountName, setNewAccountName] = useState("");
+  const [accountError, setAccountError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
@@ -30,7 +34,7 @@ export default function PagamentosPage() {
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState<PaymentCategory>("material");
   const [supplier, setSupplier] = useState("");
-  const [account, setAccount] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [activityId, setActivityId] = useState("");
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
@@ -49,7 +53,7 @@ export default function PagamentosPage() {
   const [instAmount, setInstAmount] = useState("");
   const [instCategory, setInstCategory] = useState<PaymentCategory>("material");
   const [instSupplier, setInstSupplier] = useState("");
-  const [instAccount, setInstAccount] = useState("");
+  const [instAccountId, setInstAccountId] = useState("");
   const [instDueDate, setInstDueDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [instActivityId, setInstActivityId] = useState("");
   const [savingInstallment, setSavingInstallment] = useState(false);
@@ -64,15 +68,77 @@ export default function PagamentosPage() {
   async function load() {
     if (!currentOrgId) return;
     setLoading(true);
-    const [p, b, i] = await Promise.all([
+    const [p, b, i, a] = await Promise.all([
       supabase.from("payments").select("*").eq("organization_id", currentOrgId).order("date", { ascending: false }),
       supabase.from("budgets").select("*").eq("organization_id", currentOrgId),
       supabase.from("installments").select("*").eq("organization_id", currentOrgId).order("due_date", { ascending: true }),
+      supabase.from("accounts").select("*").eq("organization_id", currentOrgId).order("name", { ascending: true }),
     ]);
     setPayments(p.data ?? []);
     setBudgets(b.data ?? []);
     setInstallments(i.data ?? []);
+    setAccounts(a.data ?? []);
     setLoading(false);
+  }
+
+  // Cria a conta (ou reaproveita uma com o mesmo nome, ignorando maiúsculas e espaços)
+  async function ensureAccount(rawName: string): Promise<string | null> {
+    const name = rawName.trim();
+    if (!name || !currentOrgId) return null;
+    const existing = accounts.find((a) => a.name.trim().toLowerCase() === name.toLowerCase());
+    if (existing) {
+      if (!existing.active) {
+        await supabase.from("accounts").update({ active: true }).eq("id", existing.id);
+      }
+      return existing.id;
+    }
+    const { data, error } = await supabase
+      .from("accounts")
+      .insert({ name, organization_id: currentOrgId })
+      .select()
+      .single();
+    if (error || !data) {
+      setAccountError("Não foi possível criar a conta.");
+      return null;
+    }
+    setAccounts((prev) => [...prev, data].sort((x, y) => x.name.localeCompare(y.name)));
+    return data.id;
+  }
+
+  async function createAccountFor(target: "payment" | "installment") {
+    setAccountError(null);
+    const id = await ensureAccount(newAccountName);
+    if (!id) return;
+    if (target === "payment") setAccountId(id);
+    else setInstAccountId(id);
+    setNewAccountName("");
+    load();
+  }
+
+  async function addAccountFromManager(e: React.FormEvent) {
+    e.preventDefault();
+    setAccountError(null);
+    const id = await ensureAccount(newAccountName);
+    if (id) setNewAccountName("");
+    load();
+  }
+
+  async function renameAccount(acc: Account, name: string) {
+    const clean = name.trim();
+    if (!clean || clean === acc.name) return;
+    setAccountError(null);
+    const { error } = await supabase.from("accounts").update({ name: clean }).eq("id", acc.id);
+    if (error) setAccountError("Já existe uma conta com esse nome.");
+    load();
+  }
+
+  async function toggleAccount(acc: Account) {
+    await supabase.from("accounts").update({ active: !acc.active }).eq("id", acc.id);
+    load();
+  }
+
+  function accountName(accId: string | null, fallback: string | null) {
+    return accounts.find((a) => a.id === accId)?.name ?? fallback ?? "—";
   }
 
   useEffect(() => {
@@ -92,7 +158,9 @@ export default function PagamentosPage() {
     setAmount("");
     setCategory("material");
     setSupplier("");
-    setAccount("");
+    setAccountId("");
+    setNewAccountName("");
+    setAccountError(null);
     setDate(new Date().toISOString().slice(0, 10));
     setActivityId("");
     setReceiptFile(null);
@@ -108,7 +176,9 @@ export default function PagamentosPage() {
     setAmount(String(p.amount));
     setCategory(p.category);
     setSupplier(p.supplier ?? "");
-    setAccount(p.account ?? "");
+    setAccountId(p.account_id ?? "");
+    setNewAccountName("");
+    setAccountError(null);
     setDate(p.date);
     setActivityId(p.activity_id ?? "");
     setReceiptFile(null);
@@ -130,7 +200,8 @@ export default function PagamentosPage() {
       amount: parseFloat(amount.replace(",", ".")),
       category,
       supplier: supplier || null,
-      account: account || null,
+      account: null,
+      account_id: accountId && accountId !== NEW_ACCOUNT ? accountId : null,
       date,
       activity_id: activityId || null,
       receipt_path,
@@ -185,7 +256,8 @@ export default function PagamentosPage() {
       amount: parseFloat(instAmount.replace(",", ".")),
       category: instCategory,
       supplier: instSupplier || null,
-      account: instAccount || null,
+      account: null,
+      account_id: instAccountId && instAccountId !== NEW_ACCOUNT ? instAccountId : null,
       due_date: instDueDate,
       activity_id: instActivityId || null,
       organization_id: currentOrgId,
@@ -194,7 +266,8 @@ export default function PagamentosPage() {
     setInstDescription("");
     setInstAmount("");
     setInstSupplier("");
-    setInstAccount("");
+    setInstAccountId("");
+    setNewAccountName("");
     setInstActivityId("");
     setInstDueDate(new Date().toISOString().slice(0, 10));
     load();
@@ -208,7 +281,8 @@ export default function PagamentosPage() {
         amount: inst.amount,
         category: inst.category,
         supplier: inst.supplier,
-        account: inst.account,
+        account: inst.account_id ? null : inst.account,
+        account_id: inst.account_id,
         date: new Date().toISOString().slice(0, 10),
         activity_id: inst.activity_id,
         organization_id: currentOrgId,
@@ -275,6 +349,16 @@ export default function PagamentosPage() {
                   {pendingInstallments.length}
                 </span>
               )}
+            </button>
+            <button
+              onClick={() => {
+                setAccountError(null);
+                setNewAccountName("");
+                setAccountsOpen(true);
+              }}
+              className="flex items-center gap-2 bg-card border border-line hover:bg-paper text-ink text-sm font-medium px-4 py-2 rounded-md transition-colors"
+            >
+              <Landmark size={16} /> Contas
             </button>
             <button
               onClick={() => setBudgetOpen(true)}
@@ -420,7 +504,7 @@ export default function PagamentosPage() {
                       {CATEGORY_LABELS[p.category]}
                     </td>
                     <td className="py-2.5 pr-4 text-ink-soft">{p.supplier || "—"}</td>
-                    <td className="py-2.5 pr-4 text-ink-soft">{p.account || "—"}</td>
+                    <td className="py-2.5 pr-4 text-ink-soft">{accountName(p.account_id, p.account)}</td>
                     <td className="py-2.5 pr-4 text-right font-mono font-medium">
                       {formatCurrency(Number(p.amount))}
                     </td>
@@ -538,18 +622,43 @@ export default function PagamentosPage() {
           </div>
           <div>
             <label className="block text-sm text-ink-soft mb-1">Conta de origem</label>
-            <input
-              value={account}
-              onChange={(e) => setAccount(e.target.value)}
-              list="account-suggestions"
-              placeholder="Ex: Conta corrente Itaú, Pix pessoal..."
-              className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blueprint"
-            />
-            <datalist id="account-suggestions">
-              {ACCOUNT_SUGGESTIONS.map((a) => (
-                <option key={a} value={a} />
-              ))}
-            </datalist>
+            <select
+              value={accountId}
+              onChange={(e) => {
+                setAccountError(null);
+                setAccountId(e.target.value);
+              }}
+              className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
+            >
+              <option value="">Nenhuma</option>
+              {accounts
+                .filter((a) => a.active || a.id === accountId)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}{a.active ? "" : " (inativa)"}
+                  </option>
+                ))}
+              <option value={NEW_ACCOUNT}>+ Nova conta…</option>
+            </select>
+            {accountId === NEW_ACCOUNT && (
+              <div className="flex gap-2 mt-2">
+                <input
+                  autoFocus
+                  value={newAccountName}
+                  onChange={(e) => setNewAccountName(e.target.value)}
+                  placeholder="Nome da nova conta"
+                  className="flex-1 min-w-0 rounded-md border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blueprint"
+                />
+                <button
+                  type="button"
+                  onClick={() => createAccountFor("payment")}
+                  className="shrink-0 bg-blueprint hover:bg-blueprint-dark text-white text-sm font-medium px-3 rounded-md"
+                >
+                  Adicionar
+                </button>
+              </div>
+            )}
+            {accountError && <p className="text-[11px] text-safety mt-1">{accountError}</p>}
           </div>
           <div>
             <label className="block text-sm text-ink-soft mb-1">
@@ -602,6 +711,53 @@ export default function PagamentosPage() {
             {saving ? "Salvando…" : editingId ? "Salvar alterações" : "Salvar pagamento"}
           </button>
         </form>
+      </Modal>
+
+      <Modal open={accountsOpen} onClose={() => setAccountsOpen(false)} title="Contas de origem">
+        <p className="text-xs text-ink-soft mb-4">
+          Cadastre aqui as contas e bancos de onde sai o dinheiro. Nos lançamentos, você escolhe
+          da lista — sem digitar o nome toda vez.
+        </p>
+        <form onSubmit={addAccountFromManager} className="flex gap-2 mb-2">
+          <input
+            required
+            value={newAccountName}
+            onChange={(e) => setNewAccountName(e.target.value)}
+            placeholder="Ex: C6 Bank, Pix pessoal…"
+            className="flex-1 min-w-0 rounded-md border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blueprint"
+          />
+          <button
+            type="submit"
+            className="shrink-0 bg-blueprint hover:bg-blueprint-dark text-white text-sm font-medium px-3 rounded-md"
+          >
+            Adicionar
+          </button>
+        </form>
+        {accountError && <p className="text-[11px] text-safety mb-2">{accountError}</p>}
+        <div className="border-t border-line pt-4 mt-4 space-y-2">
+          {accounts.length === 0 && (
+            <p className="text-sm text-ink-soft">Nenhuma conta cadastrada ainda.</p>
+          )}
+          {accounts.map((acc) => (
+            <div key={acc.id} className="flex items-center gap-2 min-w-0">
+              <input
+                key={acc.name}
+                defaultValue={acc.name}
+                onBlur={(e) => renameAccount(acc, e.target.value)}
+                className={`flex-1 min-w-0 rounded-md border border-line bg-white px-3 py-1.5 text-sm ${
+                  acc.active ? "text-ink" : "text-ink-soft line-through"
+                }`}
+              />
+              <button
+                type="button"
+                onClick={() => toggleAccount(acc)}
+                className="shrink-0 text-xs text-ink-soft hover:text-blueprint"
+              >
+                {acc.active ? "Desativar" : "Reativar"}
+              </button>
+            </div>
+          ))}
+        </div>
       </Modal>
 
       <Modal open={budgetOpen} onClose={() => setBudgetOpen(false)} title="Orçamento por categoria">
@@ -724,6 +880,46 @@ export default function PagamentosPage() {
                 className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
               />
             </div>
+          </div>
+          <div>
+            <label className="block text-sm text-ink-soft mb-1">Conta de origem</label>
+            <select
+              value={instAccountId}
+              onChange={(e) => {
+                setAccountError(null);
+                setInstAccountId(e.target.value);
+              }}
+              className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
+            >
+              <option value="">Nenhuma</option>
+              {accounts
+                .filter((a) => a.active || a.id === instAccountId)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}{a.active ? "" : " (inativa)"}
+                  </option>
+                ))}
+              <option value={NEW_ACCOUNT}>+ Nova conta…</option>
+            </select>
+            {instAccountId === NEW_ACCOUNT && (
+              <div className="flex gap-2 mt-2">
+                <input
+                  autoFocus
+                  value={newAccountName}
+                  onChange={(e) => setNewAccountName(e.target.value)}
+                  placeholder="Nome da nova conta"
+                  className="flex-1 min-w-0 rounded-md border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blueprint"
+                />
+                <button
+                  type="button"
+                  onClick={() => createAccountFor("installment")}
+                  className="shrink-0 bg-blueprint hover:bg-blueprint-dark text-white text-sm font-medium px-3 rounded-md"
+                >
+                  Adicionar
+                </button>
+              </div>
+            )}
+            {accountError && <p className="text-[11px] text-safety mt-1">{accountError}</p>}
           </div>
           <div>
             <label className="block text-sm text-ink-soft mb-1">
