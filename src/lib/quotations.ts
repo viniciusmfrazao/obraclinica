@@ -25,13 +25,37 @@ export function parseMoney(raw: string): number | null {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
-// Total da linha: valor ajustado à mão, ou valor unitário × quantidade
+// Valor bruto da linha: valor unitário × quantidade
+export function lineGross(item: QuotationItem, price: QuotationPrice | undefined): number | null {
+  if (!price) return null;
+  return round2(Number(price.unit_price) * Number(item.quantity));
+}
+
+// Desconto da linha em R$ (valor fixo ou % do bruto), nunca maior que o bruto
+export function lineDiscountAmount(item: QuotationItem, price: QuotationPrice | undefined): number {
+  const gross = lineGross(item, price);
+  if (gross === null || !price) return 0;
+  const raw =
+    price.discount_type === "percentual"
+      ? (gross * Number(price.discount_value || 0)) / 100
+      : Number(price.discount_value || 0);
+  return round2(Math.min(Math.max(raw, 0), gross));
+}
+
+// Total calculado da linha (bruto − desconto), sem o ajuste manual
+export function lineComputed(item: QuotationItem, price: QuotationPrice | undefined): number | null {
+  const gross = lineGross(item, price);
+  if (gross === null) return null;
+  return round2(gross - lineDiscountAmount(item, price));
+}
+
+// Total da linha: valor ajustado à mão, ou o calculado
 export function lineTotal(item: QuotationItem, price: QuotationPrice | undefined): number | null {
   if (!price) return null;
   if (price.line_total_override !== null && price.line_total_override !== undefined) {
     return round2(Number(price.line_total_override));
   }
-  return round2(Number(price.unit_price) * Number(item.quantity));
+  return lineComputed(item, price);
 }
 
 export interface SupplierTotals {

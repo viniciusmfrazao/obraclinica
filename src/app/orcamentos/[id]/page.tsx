@@ -21,6 +21,7 @@ import {
 import {
   addMonthsISO,
   cheapestSupplierId,
+  lineComputed,
   lineTotal,
   parseMoney,
   PAYMENT_METHODS,
@@ -44,6 +45,45 @@ function moneyField(v: number) {
 }
 
 const ADJUSTED_INPUT = "border-safety/60 bg-safety/5";
+const LINE_INPUT =
+  "w-full min-w-0 rounded-md border border-line bg-white px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blueprint";
+
+function LineField({
+  label,
+  className = "",
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className={`block min-w-0 ${className}`}>
+      <span className="block text-[11px] text-ink-soft mb-1">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function blankSupplier(name: string): QuotationSupplier {
+  return {
+    id: "__new_supplier__",
+    organization_id: "",
+    quotation_id: "",
+    name,
+    freight: 0,
+    payment_terms: null,
+    delivery_time: null,
+    notes: null,
+    position: 0,
+    discount_type: "valor",
+    discount_value: 0,
+    subtotal_override: null,
+    total_override: null,
+    payment_method: null,
+    installments_count: 1,
+  };
+}
 
 function blurOnEnter(e: React.KeyboardEvent<HTMLInputElement>) {
   if (e.key === "Enter") {
@@ -71,9 +111,21 @@ export default function OrcamentoDetalhePage() {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [newItemDesc, setNewItemDesc] = useState("");
-  const [newItemQty, setNewItemQty] = useState("1");
-  const [newItemUnit, setNewItemUnit] = useState("");
+  // linha de lançamento (item + fornecedor + valores)
+  const [nItem, setNItem] = useState("");
+  const [nBrand, setNBrand] = useState("");
+  const [nQty, setNQty] = useState("1");
+  const [nUnit, setNUnit] = useState("");
+  const [nSupplier, setNSupplier] = useState("");
+  const [nUnitPrice, setNUnitPrice] = useState("");
+  const [nTotalTyped, setNTotalTyped] = useState<string | null>(null);
+  const [nDiscType, setNDiscType] = useState<"valor" | "percentual">("valor");
+  const [nDiscValue, setNDiscValue] = useState("");
+  const [nFreight, setNFreight] = useState("");
+  const [nMethod, setNMethod] = useState("");
+  const [nDelivery, setNDelivery] = useState("");
+  const [addingLine, setAddingLine] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [newSupplierName, setNewSupplierName] = useState("");
 
   const [payOpen, setPayOpen] = useState(false);
@@ -129,28 +181,160 @@ export default function OrcamentoDetalhePage() {
   const locked = quotation?.status !== "aberto";
 
   // ---------------- itens ----------------
-  async function addItem(e: React.FormEvent) {
+  function onSupplierTyped(value: string) {
+    const prev = suppliers.find((x) => x.name.trim().toLowerCase() === nSupplier.trim().toLowerCase());
+    const match = suppliers.find((x) => x.name.trim().toLowerCase() === value.trim().toLowerCase());
+    setNSupplier(value);
+    if (match) {
+      setNFreight(Number(match.freight) ? moneyToInput(Number(match.freight)) : "");
+      setNMethod(match.payment_method ?? "");
+      setNDelivery(match.delivery_time ?? "");
+    } else if (prev) {
+      setNFreight("");
+      setNMethod("");
+      setNDelivery("");
+    }
+  }
+
+  async function addLine(e: React.FormEvent) {
     e.preventDefault();
-    if (!quotation || !currentOrgId || !newItemDesc.trim()) return;
-    const qty = parseMoney(newItemQty) ?? 1;
-    const { data, error: err } = await supabase
-      .from("quotation_items")
-      .insert({
-        organization_id: currentOrgId,
-        quotation_id: quotation.id,
-        description: newItemDesc.trim(),
-        quantity: qty > 0 ? qty : 1,
-        unit: newItemUnit.trim() || null,
-        position: items.length,
-      })
-      .select()
-      .single();
-    if (err || !data) return setError("Não foi possível adicionar o item.");
+    if (!quotation || !currentOrgId) return;
+    const desc = nItem.trim();
+    if (!desc) return;
+    setAddingLine(true);
     setError(null);
-    setItems((prev) => [...prev, data]);
-    setNewItemDesc("");
-    setNewItemQty("1");
-    setNewItemUnit("");
+    setNotice(null);
+
+    const qtyParsed = parseMoney(nQty);
+    const qtyN = qtyParsed && qtyParsed > 0 ? qtyParsed : 1;
+    const unitParsed = parseMoney(nUnitPrice);
+    const totalParsed = nTotalTyped !== null ? parseMoney(nTotalTyped) : null;
+    const discParsed = parseMoney(nDiscValue) ?? 0;
+
+    // 1) item (reaproveita se já existir com o mesmo nome)
+    let item: QuotationItem | undefined = items.find(
+      (i) => i.description.trim().toLowerCase() === desc.toLowerCase()
+    );
+    let reused = false;
+    if (item) {
+      reused = true;
+    } else {
+      const { data, error: err } = await supabase
+        .from("quotation_items")
+        .insert({
+          organization_id: currentOrgId,
+          quotation_id: quotation.id,
+          description: desc,
+          quantity: qtyN,
+          unit: nUnit.trim() || null,
+          position: items.length,
+        })
+        .select()
+        .single();
+      if (err || !data) {
+        setAddingLine(false);
+        return setError("Não foi possível adicionar o item.");
+      }
+      item = data;
+      setItems((prev) => [...prev, data]);
+    }
+    const theItem = item as QuotationItem;
+
+    // 2) fornecedor (cria se for novo) e dados gerais dele
+    let supplier: QuotationSupplier | undefined;
+    const supName = nSupplier.trim();
+    if (supName) {
+      supplier = suppliers.find((x) => x.name.trim().toLowerCase() === supName.toLowerCase());
+      if (!supplier) {
+        const { data, error: err } = await supabase
+          .from("quotation_suppliers")
+          .insert({
+            organization_id: currentOrgId,
+            quotation_id: quotation.id,
+            name: supName,
+            position: suppliers.length,
+          })
+          .select()
+          .single();
+        if (err || !data) {
+          setAddingLine(false);
+          return setError("Não foi possível adicionar o fornecedor.");
+        }
+        supplier = data;
+        setSuppliers((prev) => [...prev, data]);
+      }
+      const sup = supplier as QuotationSupplier;
+      const patch: Partial<QuotationSupplier> = {};
+      const fr = parseMoney(nFreight);
+      if (fr !== null && fr !== Number(sup.freight)) patch.freight = fr;
+      if (nMethod && nMethod !== sup.payment_method) patch.payment_method = nMethod;
+      if (nDelivery.trim() && nDelivery.trim() !== sup.delivery_time) patch.delivery_time = nDelivery.trim();
+      if (Object.keys(patch).length > 0) await updateSupplier(sup, patch);
+    }
+
+    // 3) preço da linha
+    let priced = false;
+    if (supplier && (unitParsed !== null || totalParsed !== null)) {
+      const itemQty = Number(theItem.quantity) > 0 ? Number(theItem.quantity) : 1;
+      const unitFinal =
+        unitParsed !== null ? unitParsed : Math.round(((totalParsed as number) / itemQty) * 1e6) / 1e6;
+      const gross = round2(unitFinal * itemQty);
+      const discAmount = round2(
+        Math.min(Math.max(nDiscType === "percentual" ? (gross * discParsed) / 100 : discParsed, 0), gross)
+      );
+      const computed = round2(gross - discAmount);
+      const override = totalParsed !== null && round2(totalParsed) !== computed ? totalParsed : null;
+
+      const { data, error: err } = await supabase
+        .from("quotation_prices")
+        .upsert(
+          {
+            organization_id: currentOrgId,
+            quotation_id: quotation.id,
+            supplier_id: (supplier as QuotationSupplier).id,
+            item_id: theItem.id,
+            unit_price: unitFinal,
+            brand: nBrand.trim() || null,
+            discount_type: nDiscType,
+            discount_value: discParsed,
+            line_total_override: override,
+          },
+          { onConflict: "supplier_id,item_id" }
+        )
+        .select()
+        .single();
+      if (err || !data) {
+        setAddingLine(false);
+        return setError("O item foi criado, mas não foi possível salvar o valor.");
+      }
+      priced = true;
+      setPrices((prev) => [
+        ...prev.filter((p) => !(p.supplier_id === data.supplier_id && p.item_id === data.item_id)),
+        data,
+      ]);
+    }
+
+    const notes: string[] = [];
+    if (reused) {
+      notes.push(
+        `“${theItem.description}” já estava no orçamento — mantida a quantidade ${theItem.quantity}${
+          theItem.unit ? " " + theItem.unit : ""
+        }.`
+      );
+    }
+    if (supplier && !priced) notes.push("Fornecedor adicionado, mas sem valor ainda.");
+    if (priced) notes.push(`Linha lançada para ${(supplier as QuotationSupplier).name}.`);
+    setNotice(notes.length > 0 ? notes.join(" ") : "Item adicionado.");
+
+    // limpa a linha, mantendo fornecedor e dados gerais para o próximo item
+    setNItem("");
+    setNBrand("");
+    setNQty("1");
+    setNUnit("");
+    setNUnitPrice("");
+    setNTotalTyped(null);
+    setNDiscValue("");
+    setAddingLine(false);
   }
 
   async function updateItem(item: QuotationItem, patch: Partial<QuotationItem>) {
@@ -243,6 +427,22 @@ export default function OrcamentoDetalhePage() {
     setPrices((prev) => [...prev.filter((p) => !(p.supplier_id === s.id && p.item_id === item.id)), data]);
   }
 
+  // Marca e desconto da linha. Mudar o desconto volta o total da linha ao cálculo.
+  async function savePriceExtras(
+    s: QuotationSupplier,
+    item: QuotationItem,
+    patch: Partial<Pick<QuotationPrice, "brand" | "discount_type" | "discount_value">>
+  ) {
+    const existing = prices.find((p) => p.supplier_id === s.id && p.item_id === item.id);
+    if (!existing) return;
+    const full: Partial<QuotationPrice> = { ...patch };
+    if ("discount_type" in patch || "discount_value" in patch) full.line_total_override = null;
+    const { error: err } = await supabase.from("quotation_prices").update(full).eq("id", existing.id);
+    if (err) return setError("Não foi possível salvar a linha.");
+    setError(null);
+    setPrices((prev) => prev.map((p) => (p.id === existing.id ? { ...p, ...full } : p)));
+  }
+
   // Total da linha editável: grava o valor digitado e mantém o unitário coerente
   async function saveLineTotal(s: QuotationSupplier, item: QuotationItem, raw: string) {
     if (!quotation || !currentOrgId) return;
@@ -263,7 +463,7 @@ export default function OrcamentoDetalhePage() {
       return;
     }
 
-    const computed = existing ? round2(Number(existing.unit_price) * qty) : null;
+    const computed = lineComputed(item, existing);
     const override = computed !== null && value === computed ? null : value;
     if (existing && Number(existing.line_total_override ?? -1) === (override ?? -1)) return;
 
@@ -432,6 +632,68 @@ export default function OrcamentoDetalhePage() {
   const chosen = suppliers.find((s) => s.id === quotation.chosen_supplier_id) ?? null;
   const chosenTotals = chosen ? supplierTotals(items, prices, chosen) : null;
 
+  // ---- prévia da linha que está sendo digitada
+  const nQtyParsed = parseMoney(nQty);
+  const nQtyN = nQtyParsed && nQtyParsed > 0 ? nQtyParsed : 1;
+  const nUnitN = parseMoney(nUnitPrice);
+  const nDiscN = parseMoney(nDiscValue) ?? 0;
+  const nGross = nUnitN !== null ? round2(nUnitN * nQtyN) : null;
+  const nDiscAmount =
+    nGross !== null
+      ? round2(Math.min(Math.max(nDiscType === "percentual" ? (nGross * nDiscN) / 100 : nDiscN, 0), nGross))
+      : 0;
+  const nComputed = nGross !== null ? round2(nGross - nDiscAmount) : null;
+  const nTotalTypedN = nTotalTyped !== null ? parseMoney(nTotalTyped) : null;
+  const nLineTotal = nTotalTypedN ?? nComputed;
+  const nTotalShown = nTotalTyped ?? (nComputed !== null ? moneyField(nComputed) : "");
+  const nSupplierName = nSupplier.trim();
+  const nExistingSupplier = nSupplierName
+    ? suppliers.find((x) => x.name.trim().toLowerCase() === nSupplierName.toLowerCase())
+    : undefined;
+  const nExistingItem = nItem.trim()
+    ? items.find((i) => i.description.trim().toLowerCase() === nItem.trim().toLowerCase())
+    : undefined;
+
+  const linePreview = (() => {
+    if (!nSupplierName || nLineTotal === null) return null;
+    const base = nExistingSupplier ?? blankSupplier(nSupplierName);
+    const freightTyped = parseMoney(nFreight);
+    const sup: QuotationSupplier = {
+      ...base,
+      freight: freightTyped ?? Number(base.freight),
+      subtotal_override: null,
+      total_override: null,
+    };
+    const tmpItem: QuotationItem = nExistingItem ?? {
+      id: "__new_item__",
+      organization_id: "",
+      quotation_id: "",
+      description: nItem,
+      quantity: nQtyN,
+      unit: null,
+      position: 0,
+    };
+    const itemsP = nExistingItem ? items : [...items, tmpItem];
+    const tmpPrice: QuotationPrice = {
+      id: "__new_price__",
+      organization_id: "",
+      quotation_id: "",
+      supplier_id: sup.id,
+      item_id: tmpItem.id,
+      unit_price: nUnitN ?? nLineTotal / (Number(tmpItem.quantity) || 1),
+      line_total_override: nLineTotal,
+      brand: null,
+      discount_type: "valor",
+      discount_value: 0,
+    };
+    const pricesP = [
+      ...prices.filter((p) => !(p.supplier_id === sup.id && p.item_id === tmpItem.id)),
+      tmpPrice,
+    ];
+    const t = supplierTotals(itemsP, pricesP, sup);
+    return { line: nLineTotal, freight: t.freight, total: t.total };
+  })();
+
   return (
     <div>
       <PageHeader
@@ -556,14 +818,209 @@ export default function OrcamentoDetalhePage() {
           </form>
         )}
 
+        {/* Adicionar item (linha completa) */}
+        {!locked && (
+          <form onSubmit={addLine} className="bg-card border border-line rounded-lg p-4 max-w-4xl">
+            <h2 className="font-display font-semibold text-ink mb-3">Adicionar item</h2>
+
+            <div className="grid grid-cols-2 md:grid-cols-12 gap-2">
+              <LineField label="Item" className="col-span-2 md:col-span-5">
+                <input
+                  required
+                  value={nItem}
+                  onChange={(e) => setNItem(e.target.value)}
+                  placeholder="Ex: Cimento CP-II 50kg"
+                  className={LINE_INPUT}
+                />
+              </LineField>
+              <LineField label="Marca" className="col-span-2 md:col-span-3">
+                <input
+                  value={nBrand}
+                  onChange={(e) => setNBrand(e.target.value)}
+                  placeholder="Ex: Cauê"
+                  className={LINE_INPUT}
+                />
+              </LineField>
+              <LineField label="Quantidade" className="md:col-span-2">
+                <input
+                  value={nQty}
+                  onChange={(e) => setNQty(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="10"
+                  className={`${LINE_INPUT} font-mono`}
+                />
+              </LineField>
+              <LineField label="Unidade" className="md:col-span-2">
+                <input
+                  value={nUnit}
+                  onChange={(e) => setNUnit(e.target.value)}
+                  list="unit-suggestions"
+                  placeholder="sc, m², un"
+                  className={LINE_INPUT}
+                />
+                <datalist id="unit-suggestions">
+                  {["un", "sc", "m", "m²", "m³", "kg", "l", "cx", "pç", "rolo", "lata", "saco", "barra", "milheiro", "diária", "hora", "verba"].map(
+                    (u) => (
+                      <option key={u} value={u} />
+                    )
+                  )}
+                </datalist>
+              </LineField>
+
+              <LineField label="Fornecedor" className="col-span-2 md:col-span-4">
+                <input
+                  value={nSupplier}
+                  onChange={(e) => onSupplierTyped(e.target.value)}
+                  list="line-suppliers"
+                  placeholder="Nome do fornecedor"
+                  className={LINE_INPUT}
+                />
+                <datalist id="line-suppliers">
+                  {[...new Set([...suppliers.map((x) => x.name), ...supplierSuggestions])].map((n) => (
+                    <option key={n} value={n} />
+                  ))}
+                </datalist>
+                {nSupplierName && !nExistingSupplier && (
+                  <span className="block text-[11px] text-blueprint mt-1">Novo fornecedor neste orçamento</span>
+                )}
+              </LineField>
+              <LineField label="Valor unitário (R$)" className="md:col-span-2">
+                <input
+                  value={nUnitPrice}
+                  onChange={(e) => {
+                    setNUnitPrice(e.target.value);
+                    setNTotalTyped(null);
+                  }}
+                  inputMode="decimal"
+                  placeholder="50,00"
+                  className={`${LINE_INPUT} font-mono text-right`}
+                />
+              </LineField>
+              <LineField label="Desconto" className="col-span-2 md:col-span-3">
+                <div className="flex gap-1">
+                  <select
+                    value={nDiscType}
+                    onChange={(e) => {
+                      setNDiscType(e.target.value as "valor" | "percentual");
+                      setNTotalTyped(null);
+                    }}
+                    className="w-16 shrink-0 rounded-md border border-line bg-white px-1 py-2 text-sm"
+                  >
+                    <option value="valor">R$</option>
+                    <option value="percentual">%</option>
+                  </select>
+                  <input
+                    value={nDiscValue}
+                    onChange={(e) => {
+                      setNDiscValue(e.target.value);
+                      setNTotalTyped(null);
+                    }}
+                    inputMode="decimal"
+                    placeholder={nDiscType === "percentual" ? "0 %" : "0,00"}
+                    className={`${LINE_INPUT} font-mono text-right`}
+                  />
+                </div>
+              </LineField>
+              <LineField label="Valor total (R$)" className="col-span-2 md:col-span-3">
+                <input
+                  value={nTotalShown}
+                  onChange={(e) => setNTotalTyped(e.target.value.trim() === "" ? null : e.target.value)}
+                  inputMode="decimal"
+                  placeholder="calculado"
+                  title="Valor unitário × quantidade − desconto. Você pode editar."
+                  className={`${LINE_INPUT} font-mono text-right ${
+                    nTotalTyped !== null && nComputed !== null && parseMoney(nTotalTyped) !== nComputed
+                      ? ADJUSTED_INPUT
+                      : ""
+                  }`}
+                />
+              </LineField>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-12 gap-2 mt-2 pt-3 border-t border-line/60">
+              <LineField label="Frete (R$)" className="md:col-span-3">
+                <input
+                  value={nFreight}
+                  onChange={(e) => setNFreight(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="100,00"
+                  disabled={!nSupplierName}
+                  className={`${LINE_INPUT} font-mono text-right disabled:opacity-50`}
+                />
+              </LineField>
+              <LineField label="Meio de pagamento" className="md:col-span-5">
+                <select
+                  value={nMethod}
+                  onChange={(e) => setNMethod(e.target.value)}
+                  disabled={!nSupplierName}
+                  className={`${LINE_INPUT} disabled:opacity-50`}
+                >
+                  <option value="">Selecione…</option>
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </LineField>
+              <LineField label="Tempo de entrega" className="col-span-2 md:col-span-4">
+                <input
+                  value={nDelivery}
+                  onChange={(e) => setNDelivery(e.target.value)}
+                  placeholder="Ex: 3 dias úteis"
+                  disabled={!nSupplierName}
+                  className={`${LINE_INPUT} disabled:opacity-50`}
+                />
+              </LineField>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 flex-wrap mt-4">
+              <p className="text-xs font-mono text-ink-soft min-w-0">
+                {linePreview ? (
+                  <>
+                    Linha {formatCurrency(linePreview.line)} · Frete {formatCurrency(linePreview.freight)} ·{" "}
+                    <span className="text-ink font-semibold">
+                      Total geral de {nSupplierName} {formatCurrency(linePreview.total)}
+                    </span>
+                  </>
+                ) : nSupplierName ? (
+                  "Informe o valor unitário ou o total para ver o total geral."
+                ) : (
+                  "Sem fornecedor: o item entra na lista para ser cotado depois."
+                )}
+              </p>
+              <button
+                type="submit"
+                disabled={addingLine || !nItem.trim()}
+                className="flex items-center gap-1.5 bg-blueprint hover:bg-blueprint-dark text-white text-sm font-medium px-4 py-2 rounded-md disabled:opacity-60"
+              >
+                <Plus size={15} /> {addingLine ? "Adicionando…" : "Adicionar"}
+              </button>
+            </div>
+            {nExistingItem && (
+              <p className="text-[11px] text-ink-soft mt-2">
+                Este item já está no orçamento: o valor entra na linha dele
+                (quantidade mantida: {nExistingItem.quantity}
+                {nExistingItem.unit ? ` ${nExistingItem.unit}` : ""}).
+              </p>
+            )}
+          </form>
+        )}
+
+        {notice && (
+          <div className="bg-success/10 border border-success/40 text-success text-sm rounded-md px-4 py-2.5 max-w-4xl">
+            {notice}
+          </div>
+        )}
+
         {/* Comparação */}
         {items.length === 0 ? (
           <p className="text-sm text-ink-soft">
-            Comece adicionando os itens que quer orçar (ex.: Cimento CP-II, 40 sacos).
+            Comece lançando o primeiro item acima (ex.: Cimento Cauê, 10 sc, R$ 50,00, fornecedor, frete e entrega).
           </p>
         ) : suppliers.length === 0 ? (
           <p className="text-sm text-ink-soft">
-            Agora adicione os fornecedores acima para lançar os preços de cada um.
+            Informe um fornecedor na linha acima para lançar o preço de cada item.
           </p>
         ) : null}
 
@@ -670,6 +1127,19 @@ export default function OrcamentoDetalhePage() {
                         return (
                           <td key={s.id} className="px-3 py-2">
                             <input
+                              key={`b-${s.id}-${item.id}-${price?.brand ?? ""}`}
+                              defaultValue={price?.brand ?? ""}
+                              disabled={locked || !price}
+                              placeholder="Marca"
+                              title={!price ? "Lance o valor unitário primeiro" : undefined}
+                              onKeyDown={blurOnEnter}
+                              onBlur={(e) => {
+                                const v = e.target.value.trim() || null;
+                                if (v !== (price?.brand ?? null)) savePriceExtras(s, item, { brand: v });
+                              }}
+                              className="w-full rounded-md border border-line bg-white px-2 py-1 text-xs mb-1 disabled:opacity-60"
+                            />
+                            <input
                               key={`p-${s.id}-${item.id}-${price?.unit_price ?? ""}`}
                               defaultValue={moneyToInput(price ? Number(price.unit_price) : null)}
                               disabled={locked}
@@ -681,10 +1151,42 @@ export default function OrcamentoDetalhePage() {
                                 isMin ? "border-success/60 bg-success/10" : "border-line bg-white"
                               }`}
                             />
+                            <div className="flex gap-1 mt-1">
+                              <select
+                                value={price?.discount_type ?? "valor"}
+                                disabled={locked || !price}
+                                onChange={(e) =>
+                                  savePriceExtras(s, item, {
+                                    discount_type: e.target.value as "valor" | "percentual",
+                                  })
+                                }
+                                className="w-14 shrink-0 rounded border border-line bg-white px-0.5 py-0.5 text-xs disabled:opacity-60"
+                              >
+                                <option value="valor">R$</option>
+                                <option value="percentual">%</option>
+                              </select>
+                              <input
+                                key={`dc-${s.id}-${item.id}-${price?.discount_type ?? ""}-${price?.discount_value ?? ""}`}
+                                defaultValue={
+                                  price && Number(price.discount_value) ? moneyToInput(Number(price.discount_value)) : ""
+                                }
+                                disabled={locked || !price}
+                                inputMode="decimal"
+                                placeholder="desconto"
+                                onKeyDown={blurOnEnter}
+                                onBlur={(e) => {
+                                  const v = parseMoney(e.target.value) ?? 0;
+                                  if (price && v !== Number(price.discount_value)) {
+                                    savePriceExtras(s, item, { discount_value: v });
+                                  }
+                                }}
+                                className="w-full min-w-0 rounded border border-line bg-white px-1.5 py-0.5 text-xs font-mono text-right disabled:opacity-60"
+                              />
+                            </div>
                             <div className="flex items-center justify-end gap-1 mt-1">
                               <span className="text-[11px] text-ink-soft">total</span>
                               <input
-                                key={`lt-${s.id}-${item.id}-${price?.unit_price ?? ""}-${price?.line_total_override ?? ""}-${item.quantity}`}
+                                key={`lt-${s.id}-${item.id}-${price?.unit_price ?? ""}-${price?.line_total_override ?? ""}-${price?.discount_type ?? ""}-${price?.discount_value ?? ""}-${item.quantity}`}
                                 defaultValue={price ? moneyField(lineTotal(item, price) ?? 0) : ""}
                                 disabled={locked}
                                 inputMode="decimal"
@@ -692,7 +1194,7 @@ export default function OrcamentoDetalhePage() {
                                 title={
                                   price?.line_total_override != null
                                     ? "Total ajustado à mão. Apague o campo para voltar ao cálculo automático."
-                                    : "Calculado: valor unitário × quantidade. Você pode editar."
+                                    : "Calculado: valor unitário × quantidade − desconto. Você pode editar."
                                 }
                                 onKeyDown={blurOnEnter}
                                 onBlur={(e) => saveLineTotal(s, item, e.target.value)}
@@ -1113,41 +1615,6 @@ export default function OrcamentoDetalhePage() {
             </div>
           )}
         </div>
-
-        {/* Adicionar item */}
-        {!locked && (
-          <form onSubmit={addItem} className="max-w-3xl">
-            <label className="block text-sm text-ink-soft mb-1">Adicionar item</label>
-            <div className="grid grid-cols-[1fr_72px_80px_auto] gap-2">
-              <input
-                value={newItemDesc}
-                onChange={(e) => setNewItemDesc(e.target.value)}
-                placeholder="Ex: Cimento CP-II 50kg"
-                className="min-w-0 rounded-md border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blueprint"
-              />
-              <input
-                value={newItemQty}
-                onChange={(e) => setNewItemQty(e.target.value)}
-                inputMode="decimal"
-                placeholder="Qtd"
-                className="min-w-0 rounded-md border border-line bg-white px-3 py-2 text-sm font-mono"
-              />
-              <input
-                value={newItemUnit}
-                onChange={(e) => setNewItemUnit(e.target.value)}
-                placeholder="Un."
-                className="min-w-0 rounded-md border border-line bg-white px-3 py-2 text-sm"
-              />
-              <button
-                type="submit"
-                disabled={!newItemDesc.trim()}
-                className="flex items-center gap-1.5 bg-blueprint hover:bg-blueprint-dark text-white text-sm font-medium px-3 rounded-md disabled:opacity-60"
-              >
-                <Plus size={15} /> Item
-              </button>
-            </div>
-          </form>
-        )}
       </div>
 
       <Modal open={payOpen} onClose={() => setPayOpen(false)} title="Gerar contas a pagar">

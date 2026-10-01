@@ -323,6 +323,9 @@ export interface QuotationPrice {
   item_id: string;
   unit_price: number;
   line_total_override: number | null;
+  brand: string | null;
+  discount_type: "valor" | "percentual";
+  discount_value: number;
 }
 
 export interface QuotationAttachment {
