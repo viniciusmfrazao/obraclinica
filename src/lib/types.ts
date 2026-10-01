@@ -261,3 +261,59 @@ export const OCCURRENCE_TYPE_LABELS: Record<OccurrenceType, string> = {
   paralisacao: "Paralisação",
   outros: "Outros",
 };
+
+// ---------------------------------------------------------------------------
+// Orçamentos de compra (cotação com vários fornecedores)
+// ---------------------------------------------------------------------------
+
+export type QuotationStatus = "aberto" | "fechado" | "cancelado";
+
+export const QUOTATION_STATUS_LABELS: Record<QuotationStatus, string> = {
+  aberto: "Em cotação",
+  fechado: "Fornecedor escolhido",
+  cancelado: "Cancelado",
+};
+
+export interface Quotation {
+  id: string;
+  organization_id: string;
+  title: string;
+  category: PaymentCategory;
+  activity_id: string | null;
+  notes: string | null;
+  status: QuotationStatus;
+  chosen_supplier_id: string | null;
+  installment_id: string | null;
+  created_at: string;
+}
+
+export interface QuotationItem {
+  id: string;
+  organization_id: string;
+  quotation_id: string;
+  description: string;
+  quantity: number;
+  unit: string | null;
+  position: number;
+}
+
+export interface QuotationSupplier {
+  id: string;
+  organization_id: string;
+  quotation_id: string;
+  name: string;
+  freight: number;
+  payment_terms: string | null;
+  delivery_time: string | null;
+  notes: string | null;
+  position: number;
+}
+
+export interface QuotationPrice {
+  id: string;
+  organization_id: string;
+  quotation_id: string;
+  supplier_id: string;
+  item_id: string;
+  unit_price: number;
+}
