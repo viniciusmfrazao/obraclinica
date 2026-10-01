@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { Plus, FileText, Download, Pencil, FolderPlus, Folder as FolderIcon } from "lucide-react";
+import { Plus, FileText, Download, Pencil, FolderPlus, Folder as FolderIcon, UploadCloud } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/lib/org-context";
 import { Doc, DocumentCategory, DOC_CATEGORY_LABELS, Folder } from "@/lib/types";
@@ -30,6 +30,7 @@ export default function DocumentosPage() {
   const [folderId, setFolderId] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
+  const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [savingFolder, setSavingFolder] = useState(false);
@@ -65,6 +66,13 @@ export default function DocumentosPage() {
     setFiles([]);
     setUploadErrors([]);
     setOpen(true);
+  }
+
+  function openWithFiles(list: FileList | File[] | null) {
+    const picked = Array.from(list ?? []);
+    if (picked.length === 0) return;
+    openNew();
+    setFiles(picked);
   }
 
   function openEdit(d: Doc) {
@@ -185,7 +193,7 @@ export default function DocumentosPage() {
               onClick={openNew}
               className="flex items-center gap-2 bg-blueprint hover:bg-blueprint-dark text-white text-sm font-medium px-4 py-2 rounded-md transition-colors"
             >
-              <Plus size={16} /> Novo documento
+              <UploadCloud size={16} /> Enviar arquivos
             </button>
           </div>
         }
@@ -238,6 +246,45 @@ export default function DocumentosPage() {
             ))}
           </select>
         </div>
+
+        <label
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            openWithFiles(e.dataTransfer.files);
+          }}
+          className={`flex flex-col items-center justify-center gap-1.5 text-center rounded-lg border-2 border-dashed px-4 cursor-pointer transition-colors max-w-4xl mb-6 ${
+            docs.length === 0 ? "py-10" : "py-5"
+          } ${
+            dragging
+              ? "border-blueprint bg-blueprint/10"
+              : "border-line bg-card hover:border-blueprint hover:bg-paper"
+          }`}
+        >
+          <UploadCloud size={docs.length === 0 ? 28 : 20} className="text-blueprint" />
+          <span className="text-sm font-medium text-ink">
+            Arraste arquivos aqui ou clique para enviar
+          </span>
+          <span className="text-xs text-ink-soft">
+            PDF, imagens, planilhas… vários de uma vez
+            {activeFolder !== "all" &&
+              ` · vão para a pasta “${folders.find((f) => f.id === activeFolder)?.name ?? ""}”`}
+          </span>
+          <input
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              openWithFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </label>
 
         {loading ? (
           <p className="text-ink-soft text-sm font-mono">Carregando…</p>
@@ -315,9 +362,19 @@ export default function DocumentosPage() {
                 }}
                 className="w-full text-sm text-ink-soft"
               />
+              {files.length > 0 && (
+                <ul className="mt-2 space-y-0.5">
+                  {files.map((f) => (
+                    <li key={f.name + f.size} className="text-xs text-ink flex items-center gap-1.5 min-w-0">
+                      <FileText size={12} className="text-blueprint shrink-0" />
+                      <span className="truncate">{f.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
               {files.length > 1 && (
                 <p className="text-[11px] text-ink-soft mt-1">
-                  {files.length} arquivos selecionados — cada um será salvo com o próprio nome.
+                  Cada arquivo será salvo com o próprio nome.
                 </p>
               )}
               {uploadErrors.length > 0 && (
