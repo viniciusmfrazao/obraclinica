@@ -17,6 +17,7 @@ export type PaymentCategory =
   | "mao_de_obra"
   | "projeto"
   | "equipamento"
+  | "documentacao"
   | "outros";
 
 export interface Payment {
@@ -129,6 +130,7 @@ export const CATEGORY_LABELS: Record<PaymentCategory, string> = {
   mao_de_obra: "Mão de obra",
   projeto: "Projeto",
   equipamento: "Equipamento",
+  documentacao: "Documentação e taxas",
   outros: "Outros",
 };
 
